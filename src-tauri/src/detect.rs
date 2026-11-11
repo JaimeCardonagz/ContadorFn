@@ -3,11 +3,13 @@
 //! Es lógica pura: recibe una `Observation` por frame analizado y decide si se
 //! abrió un cofre o una caja de munición. No sabe de dónde salen las señales.
 //!
-//! Así funciona en el juego (medido en `Debug/Cofres Prueba.mp4`, 2026-11-11):
-//! al apuntar aparece el prompt "BUSCAR" junto a la mira; un **toque** de la
+//! Así funciona en el juego (medido en los vídeos de `Debug/`, 2026-11-11):
+//! al apuntar aparece el recuadro "BUSCAR" junto a la mira; un **toque** de la
 //! tecla arranca un anillo de progreso alrededor de la tecla que se completa
-//! solo en ~0,7 s y **no se puede cancelar**; el prompt desaparece ~0,25 s
-//! después y ~0,35 s más tarde salen los avisos de experiencia.
+//! solo en ~0,7 s y **no se puede cancelar**; el recuadro desaparece ~0,25 s
+//! después y enseguida sale, en un sitio fijo, el aviso de experiencia cuya
+//! última línea dice qué se abrió: "COFRE", "COFRE RARO", "CAJA DE MUNICIÓN".
+//! Ese aviso confirma la apertura y a la vez da el tipo.
 
 use crate::store::ChestType;
 
@@ -15,28 +17,22 @@ pub const S1_PROMPT: u8 = 1 << 0;
 pub const S2_TYPE: u8 = 1 << 1;
 pub const S3_INPUT: u8 = 1 << 2;
 pub const S4_PROGRESS: u8 = 1 << 3;
-pub const S5_AUDIO: u8 = 1 << 4;
-pub const S5_VISUAL: u8 = 1 << 5;
+pub const S5_NOTICE: u8 = 1 << 4;
 
-/// Lo que se ve y se oye en un instante.
+/// Lo que se ve en un instante.
 #[derive(Debug, Clone, Copy)]
 pub struct Observation {
     pub t_ms: i64,
-    /// S1: el prompt "BUSCAR" está visible junto a la mira.
+    /// S1: el recuadro "BUSCAR" está visible junto a la mira.
     pub prompt: bool,
-    /// S2: qué contenedor es; `None` si no es ninguno de los que se cuentan
-    /// (puerta, arma en el suelo, nada reconocible).
-    pub chest: Option<ChestType>,
     /// S3: la tecla de interactuar se pulsó desde la observación anterior
     /// (basta un toque); `None` si no hay escucha de entrada disponible.
     pub key_pressed: Option<bool>,
     /// S4: llenado del anillo de progreso, de 0.0 a 1.0.
     pub progress: f32,
-    /// S5: se reconoció el sonido de apertura.
-    pub audio_confirm: bool,
-    /// S5: está en pantalla el aviso de apertura ("+PE COFRE",
-    /// "CONTENEDOR ABIERTO").
-    pub visual_confirm: bool,
+    /// S2 + S5: tipo que nombra el aviso de experiencia en pantalla; `None`
+    /// si no hay aviso o no es de un contenedor de los que se cuentan.
+    pub notice: Option<ChestType>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -45,9 +41,12 @@ pub struct Config {
     pub complete_at: f32,
     /// Plazo para que el anillo, una vez arrancado, se complete o desaparezca.
     pub opening_timeout_ms: i64,
-    /// Tras completarse, plazo para que desaparezca el prompt y llegue S5.
+    /// Tras terminar el anillo, plazo para que llegue el aviso.
     pub verify_window_ms: i64,
-    /// Pausa tras contar, para que un parpadeo del prompt no cuente dos veces.
+    /// Si al abrir ya había en pantalla un aviso (del contenedor anterior), se
+    /// espera este tiempo a que cambie antes de darlo por bueno.
+    pub stale_wait_ms: i64,
+    /// Pausa tras contar, para que un parpadeo del recuadro no cuente dos veces.
     pub cooldown_ms: i64,
 }
 
@@ -57,6 +56,7 @@ impl Default for Config {
             complete_at: 0.9,
             opening_timeout_ms: 3_000,
             verify_window_ms: 1_500,
+            stale_wait_ms: 800,
             cooldown_ms: 500,
         }
     }
@@ -75,7 +75,7 @@ pub struct ChestOpened {
 pub enum Rejected {
     /// El anillo arrancó pero ni se completó ni desapareció a tiempo.
     TimedOut,
-    /// La apertura terminó pero no llegó ninguna confirmación (S5).
+    /// La apertura terminó pero no llegó ningún aviso reconocido.
     NoConfirmation,
 }
 
@@ -90,23 +90,23 @@ pub enum Outcome {
 #[derive(Debug, Clone, Copy)]
 enum State {
     Idle,
-    /// A la vista: el tipo queda fijado aquí. `pressed` recuerda el toque de
-    /// tecla, que llega uno o dos frames antes de que arranque el anillo.
+    /// Recuadro a la vista. `pressed` recuerda el toque de tecla, que llega
+    /// uno o dos frames antes de que arranque el anillo.
     InView {
-        chest: ChestType,
         pressed: bool,
     },
-    /// El anillo está avanzando.
+    /// El anillo está avanzando. `stale` es el aviso que ya había en pantalla,
+    /// que es de un contenedor anterior.
     Opening {
-        chest: ChestType,
         used_key: bool,
+        stale: Option<ChestType>,
         deadline: i64,
     },
-    /// La apertura terminó: se espera a que desaparezca el prompt y a S5.
+    /// El anillo terminó: se espera a que desaparezca el recuadro y al aviso.
     Verifying {
-        chest: ChestType,
         signals: u8,
-        prompt_gone: bool,
+        stale: Option<ChestType>,
+        prompt_gone_at: Option<i64>,
         deadline: i64,
     },
     Cooldown {
@@ -138,17 +138,14 @@ impl OpeningDetector {
                     }
                     self.state = State::Idle;
                 }
-                State::Idle => match obs.chest {
-                    Some(chest) if obs.prompt => {
-                        self.state = State::InView {
-                            chest,
-                            pressed: false,
-                        }
+                State::Idle => {
+                    if !obs.prompt {
+                        return Outcome::Nothing;
                     }
-                    _ => return Outcome::Nothing,
-                },
-                State::InView { chest, pressed } => {
-                    if !obs.prompt || obs.chest.is_none() {
+                    self.state = State::InView { pressed: false };
+                }
+                State::InView { pressed } => {
+                    if !obs.prompt {
                         self.state = State::Idle;
                         return Outcome::Nothing;
                     }
@@ -157,25 +154,23 @@ impl OpeningDetector {
                     // sin ella basta con que el anillo arranque.
                     let allowed = pressed || obs.key_pressed.is_none();
                     if obs.progress <= 0.0 || !allowed {
-                        self.state = State::InView { chest, pressed };
+                        self.state = State::InView { pressed };
                         return Outcome::Nothing;
                     }
                     self.state = State::Opening {
-                        chest,
                         used_key: pressed,
+                        stale: obs.notice,
                         deadline: obs.t_ms + self.config.opening_timeout_ms,
                     };
                 }
                 State::Opening {
-                    chest,
-                    used_key,
-                    deadline,
+                    used_key, deadline, ..
                 } => {
                     let completed = obs.progress >= self.config.complete_at;
-                    // La apertura no se puede cancelar: si el prompt deja de
-                    // verse (el jugador giró la cámara), el cofre se abre igual.
+                    // La apertura no se puede cancelar: si el recuadro deja de
+                    // verse (el jugador giró la cámara), se abre igual.
                     if completed || !obs.prompt {
-                        let mut signals = S1_PROMPT | S2_TYPE;
+                        let mut signals = S1_PROMPT;
                         if used_key {
                             signals |= S3_INPUT;
                         }
@@ -183,9 +178,9 @@ impl OpeningDetector {
                             signals |= S4_PROGRESS;
                         }
                         self.state = State::Verifying {
-                            chest,
                             signals,
-                            prompt_gone: false,
+                            stale: obs.notice,
+                            prompt_gone_at: None,
                             deadline: obs.t_ms + self.config.verify_window_ms,
                         };
                         continue;
@@ -196,40 +191,49 @@ impl OpeningDetector {
                         };
                         return Outcome::Rejected(Rejected::TimedOut);
                     }
+                    self.state = State::Opening {
+                        used_key,
+                        stale: obs.notice,
+                        deadline,
+                    };
                     return Outcome::Nothing;
                 }
                 State::Verifying {
-                    chest,
-                    mut signals,
-                    mut prompt_gone,
+                    signals,
+                    stale,
+                    mut prompt_gone_at,
                     deadline,
                 } => {
-                    prompt_gone |= !obs.prompt;
-                    if obs.audio_confirm {
-                        signals |= S5_AUDIO;
+                    if !obs.prompt && prompt_gone_at.is_none() {
+                        prompt_gone_at = Some(obs.t_ms);
                     }
-                    if obs.visual_confirm {
-                        signals |= S5_VISUAL;
-                    }
-                    let confirmed = signals & (S5_AUDIO | S5_VISUAL) != 0;
-                    if prompt_gone && confirmed {
+                    // Un aviso distinto del que ya había es el de esta
+                    // apertura. Si es igual puede ser el anterior aún visible:
+                    // se le da un margen por si cambia y luego se acepta.
+                    let confirmed = match (prompt_gone_at, obs.notice) {
+                        (Some(gone_at), Some(kind)) => (Some(kind) != stale
+                            || obs.t_ms - gone_at >= self.config.stale_wait_ms)
+                            .then_some(kind),
+                        _ => None,
+                    };
+                    if let Some(chest) = confirmed {
                         self.state = State::Cooldown {
                             until: obs.t_ms + self.config.cooldown_ms,
                         };
-                        return Outcome::Counted(opened(chest, signals));
+                        return Outcome::Counted(opened(chest, signals | S2_TYPE | S5_NOTICE));
                     }
                     if obs.t_ms >= deadline {
-                        // Se entra en pausa y no en reposo: si el prompt sigue
-                        // en pantalla, es la misma aparición ya descartada.
+                        // Se entra en pausa y no en reposo: si el recuadro
+                        // sigue en pantalla, es la misma aparición descartada.
                         self.state = State::Cooldown {
                             until: obs.t_ms + self.config.cooldown_ms,
                         };
                         return Outcome::Rejected(Rejected::NoConfirmation);
                     }
                     self.state = State::Verifying {
-                        chest,
                         signals,
-                        prompt_gone,
+                        stale,
+                        prompt_gone_at,
                         deadline,
                     };
                     return Outcome::Nothing;
@@ -240,27 +244,17 @@ impl OpeningDetector {
 }
 
 fn opened(chest: ChestType, signals: u8) -> ChestOpened {
-    // S5 cuenta como una sola señal aunque lleguen sonido e imagen.
-    let present = [
-        S1_PROMPT,
-        S2_TYPE,
-        S3_INPUT,
-        S4_PROGRESS,
-        S5_AUDIO | S5_VISUAL,
-    ]
-    .iter()
-    .filter(|&&bit| signals & bit != 0)
-    .count();
     ChestOpened {
         chest,
         signals,
-        confidence: present as f32 / 5.0,
+        confidence: (signals & 0b1_1111).count_ones() as f32 / 5.0,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ChestType::{Ammo, Normal, Rare, Spirit};
 
     /// Guion de frames a 30 fps con los tiempos medidos en el juego.
     struct Sim {
@@ -273,22 +267,23 @@ mod tests {
     const NOTHING: Observation = Observation {
         t_ms: 0,
         prompt: false,
-        chest: None,
         key_pressed: Some(false),
         progress: 0.0,
-        audio_confirm: false,
-        visual_confirm: false,
+        notice: None,
     };
-    const POPUP: Observation = Observation {
-        visual_confirm: true,
+    /// Apuntando a algo que se puede buscar.
+    const PROMPT: Observation = Observation {
+        prompt: true,
         ..NOTHING
     };
-    const TAP: Option<bool> = Some(true);
+    const TAP: Observation = Observation {
+        key_pressed: Some(true),
+        ..PROMPT
+    };
 
-    fn looking_at(chest: ChestType) -> Observation {
+    fn notice(kind: ChestType) -> Observation {
         Observation {
-            prompt: true,
-            chest: Some(chest),
+            notice: Some(kind),
             ..NOTHING
         }
     }
@@ -321,7 +316,7 @@ mod tests {
             }
         }
 
-        /// El anillo sube hasta `to` en ~0,7 s (22 frames) mirando a `base`.
+        /// El anillo sube hasta `to` en ~0,7 s (22 frames) sobre `base`.
         fn ring(&mut self, base: Observation, to: f32) {
             for i in 1..=22 {
                 self.frame(Observation {
@@ -331,91 +326,59 @@ mod tests {
             }
         }
 
-        /// Apertura real: toque, anillo completo, el prompt se queda ~0,25 s,
-        /// desaparece y ~0,35 s después sale el aviso.
-        fn open(&mut self, base: Observation) {
+        /// Toque, anillo completo, el recuadro se queda ~0,25 s y desaparece.
+        /// `showing` es el aviso que haya en pantalla mientras tanto.
+        fn tap_and_ring(&mut self, showing: Option<ChestType>) {
+            let prompt = Observation {
+                notice: showing,
+                ..PROMPT
+            };
             self.frame(Observation {
-                key_pressed: base.key_pressed.map(|_| true),
-                ..base
+                notice: showing,
+                ..TAP
             });
-            self.ring(base, 1.0);
-            self.frames(7, base);
-            self.frames(
-                10,
-                Observation {
-                    key_pressed: base.key_pressed,
-                    ..NOTHING
-                },
-            );
-            self.frames(
-                60,
-                Observation {
-                    key_pressed: base.key_pressed,
-                    ..POPUP
-                },
-            );
+            self.ring(prompt, 1.0);
+            self.frames(7, prompt);
+        }
+
+        /// Apertura real completa de un contenedor de tipo `kind`.
+        fn open(&mut self, kind: ChestType) {
+            self.tap_and_ring(None);
+            self.frames(10, NOTHING);
+            self.frames(60, notice(kind));
+        }
+
+        fn kinds(&self) -> Vec<ChestType> {
+            self.counted.iter().map(|c| c.chest).collect()
         }
     }
 
     #[test]
     fn un_toque_y_el_anillo_completo_cuentan_una_vez_con_todas_las_senales() {
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Rare);
-        s.frames(15, chest);
-        s.open(chest);
+        s.frames(15, PROMPT);
+        s.open(Rare);
         s.frames(60, NOTHING);
 
         assert_eq!(s.rejected, []);
         assert_eq!(s.counted.len(), 1);
         let c = s.counted[0];
-        assert_eq!(c.chest, ChestType::Rare);
+        assert_eq!(c.chest, Rare);
         assert_eq!(
             c.signals,
-            S1_PROMPT | S2_TYPE | S3_INPUT | S4_PROGRESS | S5_VISUAL
+            S1_PROMPT | S2_TYPE | S3_INPUT | S4_PROGRESS | S5_NOTICE
         );
         assert_eq!(c.confidence, 1.0);
     }
 
     #[test]
-    fn la_tecla_no_hace_falta_mantenerla() {
-        // Tras el toque la tecla está suelta durante todo el anillo.
+    fn el_tipo_lo_da_el_texto_del_aviso() {
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frame(Observation {
-            key_pressed: TAP,
-            ..chest
-        });
-        s.ring(chest, 1.0);
-        s.frames(10, NOTHING);
-        s.frame(POPUP);
-        assert_eq!(s.counted.len(), 1);
-        assert_ne!(s.counted[0].signals & S3_INPUT, 0);
-    }
-
-    #[test]
-    fn la_confirmacion_por_sonido_tambien_vale() {
-        let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frame(Observation {
-            key_pressed: TAP,
-            ..chest
-        });
-        s.ring(chest, 1.0);
-        s.frames(3, NOTHING);
-        s.frame(Observation {
-            audio_confirm: true,
-            ..NOTHING
-        });
-        assert_eq!(s.counted.len(), 1);
-        assert_eq!(s.counted[0].signals & (S5_AUDIO | S5_VISUAL), S5_AUDIO);
-    }
-
-    #[test]
-    fn la_caja_de_municion_cuenta_como_municion() {
-        let mut s = Sim::new();
-        s.open(looking_at(ChestType::Ammo));
-        assert_eq!(s.counted.len(), 1);
-        assert_eq!(s.counted[0].chest, ChestType::Ammo);
+        for kind in [Normal, Rare, Spirit, Ammo] {
+            s.open(kind);
+        }
+        assert_eq!(s.kinds(), [Normal, Rare, Spirit, Ammo]);
+        assert_eq!(s.rejected, []);
     }
 
     #[test]
@@ -424,37 +387,30 @@ mod tests {
         s.frames(
             120,
             Observation {
-                key_pressed: TAP,
-                ..POPUP
+                key_pressed: Some(true),
+                ..notice(Normal)
             },
         );
         assert!(s.counted.is_empty() && s.rejected.is_empty());
     }
 
     #[test]
-    fn una_puerta_u_otro_objeto_no_cuenta() {
-        // Hay prompt, anillo y aviso, pero no es un contenedor reconocido.
+    fn un_contenedor_sin_aviso_reconocido_no_cuenta() {
+        // Otro objeto con "BUSCAR" (nevera, barril): hay anillo pero el aviso
+        // no nombra ningún tipo de los que se cuentan.
         let mut s = Sim::new();
-        s.open(Observation {
-            prompt: true,
-            ..NOTHING
-        });
-        assert!(s.counted.is_empty() && s.rejected.is_empty());
+        s.tap_and_ring(None);
+        s.frames(90, NOTHING);
+        assert!(s.counted.is_empty());
+        assert_eq!(s.rejected, [Rejected::NoConfirmation]);
     }
 
     #[test]
     fn pulsar_frente_al_cofre_sin_que_arranque_el_anillo_no_cuenta() {
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frames(
-            30,
-            Observation {
-                key_pressed: TAP,
-                ..chest
-            },
-        );
+        s.frames(30, TAP);
         s.frames(10, NOTHING);
-        s.frames(30, POPUP);
+        s.frames(30, notice(Normal));
         assert!(s.counted.is_empty() && s.rejected.is_empty());
     }
 
@@ -462,10 +418,9 @@ mod tests {
     fn un_anillo_sin_haber_visto_la_tecla_no_cuenta() {
         // Hay escucha de teclado y no vio ningún toque: no se da por bueno.
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.ring(chest, 1.0);
+        s.ring(PROMPT, 1.0);
         s.frames(10, NOTHING);
-        s.frames(30, POPUP);
+        s.frames(30, notice(Normal));
         assert!(s.counted.is_empty() && s.rejected.is_empty());
     }
 
@@ -475,60 +430,19 @@ mod tests {
         s.frames(
             90,
             Observation {
-                visual_confirm: true,
-                ..looking_at(ChestType::Normal)
+                notice: Some(Normal),
+                ..PROMPT
             },
         );
         assert!(s.counted.is_empty() && s.rejected.is_empty());
     }
 
     #[test]
-    fn sin_confirmacion_posterior_no_cuenta() {
+    fn un_aviso_fuera_de_plazo_no_cuenta() {
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frame(Observation {
-            key_pressed: TAP,
-            ..chest
-        });
-        s.ring(chest, 1.0);
-        s.frames(90, NOTHING);
-        assert!(s.counted.is_empty());
-        assert_eq!(s.rejected, [Rejected::NoConfirmation]);
-    }
-
-    #[test]
-    fn una_confirmacion_fuera_de_plazo_no_cuenta() {
-        let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frame(Observation {
-            key_pressed: TAP,
-            ..chest
-        });
-        s.ring(chest, 1.0);
-        s.frames(50, NOTHING); // 1,65 s > ventana de 1,5 s
-        s.frames(5, POPUP);
-        assert!(s.counted.is_empty());
-        assert_eq!(s.rejected, [Rejected::NoConfirmation]);
-    }
-
-    #[test]
-    fn un_aviso_antes_de_que_termine_el_anillo_no_sirve_de_confirmacion() {
-        let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frame(Observation {
-            key_pressed: TAP,
-            visual_confirm: true,
-            ..chest
-        });
-        s.ring(
-            Observation {
-                visual_confirm: true,
-                ..chest
-            },
-            0.8,
-        );
-        s.ring(chest, 1.0);
-        s.frames(90, NOTHING);
+        s.tap_and_ring(None);
+        s.frames(50, NOTHING); // 1,65 s desde que terminó el anillo
+        s.frames(5, notice(Normal));
         assert!(s.counted.is_empty());
         assert_eq!(s.rejected, [Rejected::NoConfirmation]);
     }
@@ -536,18 +450,14 @@ mod tests {
     #[test]
     fn girar_la_camara_durante_el_anillo_no_cancela_la_apertura() {
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Spirit);
-        s.frame(Observation {
-            key_pressed: TAP,
-            ..chest
-        });
-        s.ring(chest, 0.5);
-        s.frames(25, NOTHING); // deja de verse el prompt; el cofre se abre igual
-        s.frames(30, POPUP);
+        s.frame(TAP);
+        s.ring(PROMPT, 0.5);
+        s.frames(25, NOTHING); // deja de verse el recuadro; se abre igual
+        s.frames(30, notice(Spirit));
 
         assert_eq!(s.counted.len(), 1);
         let c = s.counted[0];
-        assert_eq!(c.chest, ChestType::Spirit);
+        assert_eq!(c.chest, Spirit);
         assert_eq!(c.signals & S4_PROGRESS, 0, "no se vio el anillo completo");
         assert_eq!(c.confidence, 0.8);
     }
@@ -555,17 +465,13 @@ mod tests {
     #[test]
     fn un_anillo_que_no_termina_nunca_caduca_sin_contar() {
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frame(Observation {
-            key_pressed: TAP,
-            ..chest
-        });
+        s.frame(TAP);
         s.frames(
             150,
             Observation {
                 progress: 0.4,
-                visual_confirm: true,
-                ..chest
+                notice: Some(Normal),
+                ..PROMPT
             },
         );
         assert!(s.counted.is_empty());
@@ -573,81 +479,108 @@ mod tests {
     }
 
     #[test]
-    fn prompt_que_nunca_desaparece_no_cuenta_aunque_salga_el_aviso() {
+    fn recuadro_que_nunca_desaparece_no_cuenta_aunque_salga_el_aviso() {
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frame(Observation {
-            key_pressed: TAP,
-            ..chest
-        });
-        s.ring(chest, 1.0);
+        s.frame(TAP);
+        s.ring(PROMPT, 1.0);
         s.frames(
             200,
             Observation {
                 progress: 1.0,
-                visual_confirm: true,
-                ..chest
+                notice: Some(Normal),
+                ..PROMPT
             },
         );
         assert!(s.counted.is_empty());
     }
 
     #[test]
-    fn el_parpadeo_del_prompt_tras_contar_no_cuenta_dos_veces() {
+    fn el_parpadeo_del_recuadro_tras_contar_no_cuenta_dos_veces() {
         let mut s = Sim::new();
-        let chest = looking_at(ChestType::Normal);
-        s.frame(Observation {
-            key_pressed: TAP,
-            ..chest
-        });
-        s.ring(chest, 1.0);
+        s.tap_and_ring(None);
         s.frames(3, NOTHING);
-        s.frame(POPUP);
-        // El prompt reaparece un instante con el aviso todavía en pantalla.
+        s.frame(notice(Normal));
+        // El recuadro reaparece un instante con el aviso todavía en pantalla.
         s.frames(
             8,
             Observation {
-                key_pressed: TAP,
                 progress: 1.0,
-                visual_confirm: true,
-                ..chest
+                notice: Some(Normal),
+                ..TAP
             },
         );
-        s.frames(30, POPUP);
+        s.frames(30, notice(Normal));
         assert_eq!(s.counted.len(), 1);
     }
 
     #[test]
-    fn dos_cofres_seguidos_cuentan_dos_con_su_tipo() {
+    fn con_el_aviso_anterior_aun_visible_se_espera_al_nuevo_para_el_tipo() {
+        // Caja de munición y, enseguida, un cofre raro: mientras se abre el
+        // cofre sigue en pantalla "CAJA DE MUNICIÓN".
         let mut s = Sim::new();
-        for kind in [ChestType::Normal, ChestType::Spirit] {
-            s.frames(5, looking_at(kind));
-            s.open(looking_at(kind));
-        }
-        let kinds: Vec<_> = s.counted.iter().map(|c| c.chest).collect();
-        assert_eq!(kinds, [ChestType::Normal, ChestType::Spirit]);
+        s.tap_and_ring(None);
+        s.frames(10, NOTHING);
+        s.frames(20, notice(Ammo));
+
+        s.frames(
+            5,
+            Observation {
+                notice: Some(Ammo),
+                ..PROMPT
+            },
+        );
+        s.tap_and_ring(Some(Ammo));
+        s.frames(8, notice(Ammo)); // el aviso viejo todavía no ha cambiado
+        s.frames(30, notice(Rare));
+
+        assert_eq!(s.kinds(), [Ammo, Rare]);
         assert_eq!(s.rejected, []);
     }
 
     #[test]
-    fn el_tipo_se_fija_al_ver_el_cofre_aunque_cambie_al_abrirse() {
+    fn dos_seguidos_del_mismo_tipo_cuentan_dos_aunque_el_aviso_no_cambie() {
         let mut s = Sim::new();
-        s.frames(5, looking_at(ChestType::Spirit));
-        s.open(looking_at(ChestType::Normal));
-        assert_eq!(s.counted[0].chest, ChestType::Spirit);
+        s.tap_and_ring(None);
+        s.frames(10, NOTHING);
+        s.frames(20, notice(Normal));
+
+        s.frames(
+            5,
+            Observation {
+                notice: Some(Normal),
+                ..PROMPT
+            },
+        );
+        s.tap_and_ring(Some(Normal));
+        s.frames(40, notice(Normal));
+
+        assert_eq!(s.kinds(), [Normal, Normal]);
+        assert_eq!(s.rejected, []);
     }
 
     #[test]
     fn sin_escucha_de_teclado_cuenta_con_las_otras_cuatro_senales() {
         let mut s = Sim::new();
-        let chest = Observation {
+        let prompt = Observation {
             key_pressed: None,
-            ..looking_at(ChestType::Normal)
+            ..PROMPT
         };
-        s.frames(30, chest); // mirar el cofre sin abrirlo no hace nada
+        let nothing = Observation {
+            key_pressed: None,
+            ..NOTHING
+        };
+        s.frames(30, prompt); // mirar el cofre sin abrirlo no hace nada
         assert!(s.counted.is_empty() && s.rejected.is_empty());
 
-        s.open(chest);
+        s.ring(prompt, 1.0);
+        s.frames(10, nothing);
+        s.frames(
+            30,
+            Observation {
+                notice: Some(Normal),
+                ..nothing
+            },
+        );
         assert_eq!(s.counted.len(), 1);
         let c = s.counted[0];
         assert_eq!(c.signals & S3_INPUT, 0);

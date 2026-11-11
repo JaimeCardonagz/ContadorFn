@@ -105,18 +105,18 @@ La detección **no usa machine learning ni clips de entrenamiento**. Se basa en 
 > 2. **Un solo toque** de la tecla arranca un **anillo de progreso alrededor del icono de la tecla**. Se completa solo en unos **0,7 s** y **no se puede cancelar**.
 > 3. El recuadro sigue visible ~0,25 s más y desaparece: el cofre queda abierto.
 > 4. Unos 0,35 s después aparecen dos avisos en posiciones fijas del HUD:
->    - **"+600 PE / COFRE"** (a la derecha, sobre el centro). Solo salió al abrir cofres. Puede llevar líneas intermedias ("NIVEL DE ESPÍRITU") y otra cantidad (+750), pero la última línea fue siempre "COFRE".
+>    - **Aviso de experiencia** (a la derecha, sobre el centro): una cantidad y, debajo, **qué se abrió**. Visto: **"+600 PE / COFRE"** (cofre de tesoro), **"+900 PE / COFRE RARO"** y **"+300 PE / CAJA DE MUNICIÓN"**. Puede llevar líneas intermedias ("NIVEL DE ESPÍRITU") y otra cantidad (+750), pero la última línea es siempre el tipo. El usuario confirma que sale con todos los cofres.
 >    - **"+75 CONTENEDOR ABIERTO"** (banda a la derecha). Salió con cualquier contenedor, y otro aviso puede ocupar su sitio ("¡SUBISTE DE NIVEL!").
 
 | # | Señal | Qué demuestra | Cómo se obtiene |
 |---|---|---|---|
 | S1 | Recuadro **"BUSCAR"** junto a la mira | Hay un contenedor delante | Plantilla del recuadro en una zona fija a la derecha de la mira |
-| S2 | **Tipo de contenedor** | Si es cofre de tesoro, raro, de espíritus o caja de munición | Pendiente: color/aspecto en la mira y texto del aviso de experiencia (§17) |
+| S2 | **Tipo de contenedor** | Si es cofre de tesoro, raro, de espíritus o caja de munición | **Texto de la última línea del aviso de experiencia** ("COFRE", "COFRE RARO", "CAJA DE MUNICIÓN"). No hace falta mirar el color del cofre |
 | S3 | **Toque de la tecla** | El jugador interactuó | Escucha pasiva de teclado y mando; basta una pulsación |
 | S4 | **Anillo de progreso** | La apertura arrancó y terminó | Arco alrededor del icono de la tecla, dentro del recuadro |
-| S5 | **Aviso de apertura** | El contenedor realmente se abrió | Avisos "+PE … COFRE" y "CONTENEDOR ABIERTO" en zonas fijas; sonido de apertura como alternativa |
+| S5 | **Aviso de apertura** | El contenedor realmente se abrió | El mismo aviso de experiencia que da el tipo, en su zona fija. "CONTENEDOR ABIERTO" no se usa: no distingue tipos y otros avisos lo tapan |
 
-> Se exigen tres tipos de prueba independientes: **lo que se ve** (S1, S2, S4), **lo que hace el jugador** (S3) y **lo que ocurre después** (S5).
+> Se exigen tres tipos de prueba independientes: **lo que se ve antes** (S1, S4), **lo que hace el jugador** (S3) y **lo que ocurre después** (S2 + S5, que llegan juntas en el aviso).
 
 ### Otras detecciones (contexto de partida)
 
@@ -132,12 +132,12 @@ La detección **no usa machine learning ni clips de entrenamiento**. Se basa en 
 
 ```
 [REPOSO]
-   │  S1 recuadro "BUSCAR" visible  Y  S2 contenedor reconocido
+   │  S1 recuadro "BUSCAR" visible
    ▼
-[A_LA_VISTA]  ← se fija el tipo (tesoro / raro / espíritus / munición)
+[A_LA_VISTA]
    │  S3 toque de tecla (si hay escucha)  Y  S4 el anillo arranca
    ▼
-[ABRIENDO]  ← el anillo avanza solo
+[ABRIENDO]  ← el anillo avanza solo; se anota si ya había un aviso en pantalla (es del contenedor anterior)
    │
    ├─ el anillo no termina ni desaparece en 3 s   → no cuenta (se guarda en depuración)
    │
@@ -146,11 +146,12 @@ La detección **no usa machine learning ni clips de entrenamiento**. Se basa en 
    ▼
 [VERIFICANDO]  (ventana de 1,5 s)
    │
-   ├─ sin S5                                      → no cuenta (se guarda en depuración)
+   ├─ sin aviso reconocido                        → no cuenta (se guarda en depuración)
    │
-   │  el recuadro ha desaparecido  Y  S5 aviso de apertura (o sonido)
+   │  el recuadro ha desaparecido  Y  S5 aviso con un tipo reconocido (S2)
+   │  (si el aviso es el mismo que ya había, se espera 0,8 s por si cambia)
    ▼
-[CONTAR +1 (tipo)] → pausa de 0,5 s → REPOSO
+[CONTAR +1 (tipo del aviso)] → pausa de 0,5 s → REPOSO
 ```
 
 ### Casos que nunca suben el contador
@@ -158,7 +159,8 @@ La detección **no usa machine learning ni clips de entrenamiento**. Se basa en 
 | Situación | Motivo |
 |---|---|
 | Pulsar la tecla sin apuntar a nada | No hay S1 |
-| Abrir una puerta o recoger un arma | S2 no es un contenedor de los que se cuentan |
+| Abrir una puerta o recoger un arma | No muestran "BUSCAR" ni producen aviso de contenedor |
+| Abrir otro contenedor (nevera, barril) | El aviso no nombra un tipo de los que se cuentan |
 | Pulsar frente a un cofre sin que arranque el anillo | No hay S4 |
 | Anillo en pantalla sin haber visto el toque de tecla (habiendo escucha) | Falta S3 |
 | Mirar un cofre con el aviso del anterior aún en pantalla | El aviso solo vale después de una apertura |
@@ -403,15 +405,14 @@ Confirmado por el usuario (2026-11-11):
 
 - El aviso **"+PE / COFRE" sale con todos los cofres, siempre**. Pasa a ser la confirmación principal (S5).
 - Los cofres dorados con calavera del vídeo son **cofres de tesoro**.
-- El cofre raro y el de espíritus se distinguen **por su aspecto y también por el texto** que aparece; el texto exacto está por grabar.
+- Segundo vídeo (2026-11-11): el **cofre raro** (plateado, brillo azul) da "+900 PE / COFRE RARO" y la **caja de munición** da "+300 PE / CAJA DE MUNICIÓN". El recuadro dice "BUSCAR" en ambos.
 - La **munición se cuenta aparte** y no suma al total de cofres.
 - El vídeo es del propio equipo de pruebas (pantalla 1366×768, GeForce Now); OBS lo guardó ampliado a 1080p. La **escala del HUD está por defecto**.
 - En el overlay compacto, tanto "cofres abiertos" como "número de partida" son los **históricos**.
 
 Sigue pendiente:
 
-- **Texto y aspecto del cofre raro y del cofre de espíritus** (falta un clip de cada uno).
-- **Qué muestra la caja de munición** al abrirla (falta un clip).
+- **Texto del aviso del cofre de espíritus** (falta un clip).
 - **Diagnóstico en el equipo de pruebas**: todavía sin ejecutar. Dirá si la captura funciona con GeForce Now, si se ve la tecla `E` y si llegan `F8`/`F9`, y dará las posiciones reales a 1366×768.
 - Sonido de apertura (el vídeo lo incluye; sin analizar todavía).
 - Pantalla de victoria.
@@ -424,7 +425,7 @@ Sigue pendiente:
 
 ### Decisiones ya implementadas (revisables)
 
-- **Combinación mínima de señales**: para contar se exigen S1 + S2 + anillo arrancado (S4) + desaparición del recuadro + al menos una confirmación S5 (aviso **o** sonido) dentro de 1,5 s. S3 se exige solo si hay escucha de entrada disponible. Una confirmación anterior a que termine el anillo no vale.
+- **Combinación mínima de señales**: para contar se exigen S1 + anillo arrancado (S4) + desaparición del recuadro + aviso con un tipo reconocido (S2 + S5) dentro de 1,5 s. S3 se exige solo si hay escucha de entrada disponible. Un aviso anterior a que termine el anillo no vale.
 - **"HOY"** muestra la sesión activa (una sesión que cruza la medianoche sigue siendo una); sin sesión activa muestra cero.
 - **"PARTIDA"** muestra la partida en curso o, al terminar, la última de la sesión hasta que empiece otra.
 - **Cofre sin partida detectada**: si se cuenta un cofre sin haber detectado el inicio de partida, se abre partida (y sesión) en ese momento.
