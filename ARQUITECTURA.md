@@ -105,13 +105,13 @@ La detección **no usa machine learning ni clips de entrenamiento**. Se basa en 
 > 2. **Un solo toque** de la tecla arranca un **anillo de progreso alrededor del icono de la tecla**. Se completa solo en unos **0,7 s** y **no se puede cancelar**.
 > 3. El recuadro sigue visible ~0,25 s más y desaparece: el cofre queda abierto.
 > 4. Unos 0,35 s después aparecen dos avisos en posiciones fijas del HUD:
->    - **Aviso de experiencia** (a la derecha, sobre el centro): una cantidad y, debajo, **qué se abrió**. Visto: **"+600 PE / COFRE"** (cofre de tesoro), **"+900 PE / COFRE RARO"** y **"+300 PE / CAJA DE MUNICIÓN"**. Puede llevar líneas intermedias ("NIVEL DE ESPÍRITU") y otra cantidad (+750), pero la última línea es siempre el tipo. El usuario confirma que sale con todos los cofres.
+>    - **Aviso de experiencia** (a la derecha, sobre el centro): una cantidad y, debajo, **qué se abrió**. Visto: **"+600 PE / COFRE"** (cofre de tesoro), **"+900 PE / COFRE RARO"**, **"+900 PE / COFRE DE ESPÍRITUS"** y **"+300 PE / CAJA DE MUNICIÓN"**. Puede llevar líneas intermedias ("NIVEL DE ESPÍRITU") y otra cantidad (+750), pero la última línea es siempre el tipo. El usuario confirma que sale con todos los cofres.
 >    - **"+75 CONTENEDOR ABIERTO"** (banda a la derecha). Salió con cualquier contenedor, y otro aviso puede ocupar su sitio ("¡SUBISTE DE NIVEL!").
 
 | # | Señal | Qué demuestra | Cómo se obtiene |
 |---|---|---|---|
 | S1 | Recuadro **"BUSCAR"** junto a la mira | Hay un contenedor delante | Plantilla del recuadro en una zona fija a la derecha de la mira |
-| S2 | **Tipo de contenedor** | Si es cofre de tesoro, raro, de espíritus o caja de munición | **Texto de la última línea del aviso de experiencia** ("COFRE", "COFRE RARO", "CAJA DE MUNICIÓN"). No hace falta mirar el color del cofre |
+| S2 | **Tipo de contenedor** | Si es cofre de tesoro, raro, de espíritus o caja de munición | **Texto de la última línea del aviso de experiencia** ("COFRE", "COFRE RARO", "COFRE DE ESPÍRITUS", "CAJA DE MUNICIÓN"). No hace falta mirar el color del cofre |
 | S3 | **Toque de la tecla** | El jugador interactuó | Escucha pasiva de teclado y mando; basta una pulsación |
 | S4 | **Anillo de progreso** | La apertura arrancó y terminó | Arco alrededor del icono de la tecla, dentro del recuadro |
 | S5 | **Aviso de apertura** | El contenedor realmente se abrió | El mismo aviso de experiencia que da el tipo, en su zona fija. "CONTENEDOR ABIERTO" no se usa: no distingue tipos y otros avisos lo tapan |
@@ -158,10 +158,10 @@ La detección **no usa machine learning ni clips de entrenamiento**. Se basa en 
 
 La app ya cuenta sola, de momento **usando solo el aviso de experiencia** (S2 + S5):
 
-- Unas diez veces por segundo captura únicamente la zona del aviso (18 % × 14 % de la pantalla) y lee su última línea con plantillas ("COFRE", "COFRE RARO", "CAJA DE MUNICIÓN").
+- Unas diez veces por segundo captura únicamente la zona del aviso (18 % × 14 % de la pantalla) y lee su última línea con plantillas ("COFRE", "COFRE RARO", "COFRE DE ESPÍRITUS", "CAJA DE MUNICIÓN").
 - Cuenta un contenedor cada vez que **aparece** un aviso con un tipo conocido, no una vez por cada frame en que se ve.
-- Sobre los dos vídeos completos del usuario (163 s, 1626 lecturas) cuenta exactamente lo que se abrió —4 cofres de tesoro, 1 caja de munición, 1 cofre raro— sin ninguna detección de más.
-- Guarda en `Imágenes\FortniteChestCounter\avisos\` el recorte de cada detección y de los avisos que no reconoce, para comprobar aciertos y crear plantillas de tipos nuevos (el cofre de espíritus, sin plantilla todavía).
+- Sobre los tres vídeos completos del usuario (178 s, 1778 lecturas) cuenta exactamente lo que se abrió —4 cofres de tesoro, 1 caja de munición, 1 cofre raro, 1 cofre de espíritus— sin ninguna detección de más.
+- Guarda en `Imágenes\FortniteChestCounter\avisos\` el recorte de cada detección y de los avisos que no reconoce, para comprobar aciertos y crear plantillas de tipos nuevos.
 
 **Limitaciones conocidas de esta versión:**
 
@@ -422,6 +422,7 @@ Confirmado por el usuario (2026-11-11):
 
 - El aviso **"+PE / COFRE" sale con todos los cofres, siempre**. Pasa a ser la confirmación principal (S5).
 - Los cofres dorados con calavera del vídeo son **cofres de tesoro**.
+- Tercer vídeo (2026-11-11): el **cofre de espíritus** (oscuro, con una flor rosa encima) da "+900 PE / COFRE DE ESPÍRITUS".
 - Segundo vídeo (2026-11-11): el **cofre raro** (plateado, brillo azul) da "+900 PE / COFRE RARO" y la **caja de munición** da "+300 PE / CAJA DE MUNICIÓN". El recuadro dice "BUSCAR" en ambos.
 - La **munición se cuenta aparte** y no suma al total de cofres.
 - El vídeo es del propio equipo de pruebas (pantalla 1366×768, GeForce Now); OBS lo guardó ampliado a 1080p. La **escala del HUD está por defecto**.
@@ -429,7 +430,6 @@ Confirmado por el usuario (2026-11-11):
 
 Sigue pendiente:
 
-- **Texto del aviso del cofre de espíritus** (falta un clip).
 - **Diagnóstico en el equipo de pruebas**: todavía sin ejecutar. Dirá si la captura funciona con GeForce Now, si se ve la tecla `E` y si llegan `F8`/`F9`, y dará las posiciones reales a 1366×768.
 - Sonido de apertura (el vídeo lo incluye; sin analizar todavía).
 - Pantalla de victoria.

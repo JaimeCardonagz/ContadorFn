@@ -12,3 +12,4 @@ extraer() {
 }
 extraer "Debug/Cofres Prueba.mp4" cofres-prueba
 extraer "Debug/Cofre Raro + Caja de Municion.mp4" raro-municion
+extraer "Debug/Cofre Espiritu.mp4" espiritu

@@ -147,7 +147,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ChestType::{Ammo, Normal, Rare};
+    use ChestType::{Ammo, Normal, Rare, Spirit};
 
     /// Pasa una secuencia de lecturas y devuelve lo que se contó.
     fn count(readings: &[(Option<ChestType>, usize)]) -> Vec<ChestType> {
@@ -201,7 +201,7 @@ mod tests {
         );
     }
 
-    /// Secuencias reales: recortes de la zona del aviso a 10 fps de los dos
+    /// Secuencias reales: recortes de la zona del aviso a 10 fps de los
     /// vídeos completos (locales; ver tools/extraer_avisos.sh).
     #[test]
     fn videos_completos() {
@@ -209,6 +209,7 @@ mod tests {
         let cases = [
             ("cofres-prueba", vec![Normal, Normal, Normal, Normal]),
             ("raro-municion", vec![Ammo, Rare]),
+            ("espiritu", vec![Spirit]),
         ];
         for (name, expected) in cases {
             let Ok(entries) = std::fs::read_dir(root.join(name)) else {
