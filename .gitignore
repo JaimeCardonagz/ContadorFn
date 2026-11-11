@@ -1,0 +1,22 @@
+# Rust / Tauri
+target/
+src-tauri/target/
+src-tauri/gen/
+
+# Node / Svelte
+node_modules/
+dist/
+build/
+.svelte-kit/
+
+# Capturas y registros de depuración (locales, no se suben; ver ARQUITECTURA.md §14)
+debug/
+*.log
+
+# Entorno y editor
+.env
+.env.*
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
