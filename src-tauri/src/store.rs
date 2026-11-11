@@ -10,7 +10,8 @@ pub enum ChestType {
     Normal,
     Rare,
     Spirit,
-    Boss,
+    /// Caja de munición: se cuenta aparte, no suma al total de cofres.
+    Ammo,
 }
 
 impl ChestType {
@@ -19,7 +20,7 @@ impl ChestType {
             ChestType::Normal => "normal",
             ChestType::Rare => "rare",
             ChestType::Spirit => "spirit",
-            ChestType::Boss => "boss",
+            ChestType::Ammo => "ammo",
         }
     }
 }
@@ -48,7 +49,9 @@ pub struct Counts {
     pub normal: u32,
     pub rare: u32,
     pub spirit: u32,
-    pub boss: u32,
+    /// Cajas de munición: se cuentan aparte.
+    pub ammo: u32,
+    /// Total de cofres (tesoro + raro + espíritu); no incluye la munición.
     pub total: u32,
 }
 
@@ -229,8 +232,8 @@ impl Store {
         Ok(())
     }
 
-    /// Cofres por tipo en el ámbito pedido; el tipo `None` son cofres
-    /// registrados a mano sin clasificar.
+    /// Cofres por tipo en el ámbito pedido. El tipo `None` son ajustes sin
+    /// clasificar de versiones anteriores; siguen sumando al total.
     fn buckets(&self, scope: Scope) -> Result<Vec<(Option<String>, i64)>> {
         let (sql, id) = match scope {
             Scope::Match(id) => (COUNT_BY_MATCH, Some(id)),
@@ -253,7 +256,10 @@ impl Store {
                 Some("normal") => counts.normal = n,
                 Some("rare") => counts.rare = n,
                 Some("spirit") => counts.spirit = n,
-                Some("boss") => counts.boss = n,
+                Some("ammo") => {
+                    counts.ammo = n;
+                    continue; // la munición no es un cofre: no suma al total
+                }
                 _ => {} // sin clasificar o tipo de otra versión: solo suma al total
             }
             counts.total += n;
@@ -293,10 +299,10 @@ impl Store {
     }
 
     /// Ajuste manual del histórico (p. ej. cofres abiertos antes de instalar
-    /// la app). `chest: None` suma sin clasificar. Devuelve `false`, sin
-    /// guardar nada, si el ajuste dejaría ese tipo por debajo de cero.
-    pub fn adjust_total(&self, now: i64, chest: Option<ChestType>, delta: i64) -> Result<bool> {
-        let kind = chest.map(ChestType::as_str);
+    /// la app). Devuelve `false`, sin guardar nada, si el ajuste dejaría ese
+    /// tipo por debajo de cero.
+    pub fn adjust_total(&self, now: i64, chest: ChestType, delta: i64) -> Result<bool> {
+        let kind = Some(chest.as_str());
         let current = self
             .buckets(Scope::All)?
             .into_iter()

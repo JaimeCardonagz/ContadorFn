@@ -1,6 +1,6 @@
 # Fortnite Chest Counter — Arquitectura
 
-> Versión del documento: 1.1 · Fecha: 2026-11-10 · Estado: diseño aprobado, sin implementar
+> Versión del documento: 1.2 · Fecha: 2026-11-11 · Estado: diseño aprobado, sin implementar
 >
 > **Prioridad (v1.1): primero Windows.** Linux se aborda en una fase posterior, cuando la versión de Windows esté estable. Todo lo marcado como Linux en este documento es referencia para esa fase y **no forma parte de la v1**.
 
@@ -19,9 +19,9 @@ Aplicación de escritorio **ligera, portable y de código abierto** que cuenta a
 | Modos de juego | Battle Royale y Cero Construcción |
 | Resoluciones | 16:9 (**1366×768**, 1080p, 1440p, 4K) y 16:10. 1366×768 es la del equipo de pruebas y la primera que debe funcionar |
 | Variaciones de HUD | Escala de HUD personalizada, idioma del juego distinto al español |
-| Categorías | Normal, Raro (azul), Espíritu (morado/rosado), Jefe/Bóveda. Cajas de munición y demás: **ignoradas** |
+| Categorías | **Cofre de tesoro**, **cofre raro**, **cofre de espíritus** y **caja de munición**. La munición se cuenta aparte y no suma al total de cofres. Cofres de jefe y cualquier otro objeto: **ignorados** |
 | Precisión | Objetivo: **exactitud total** (sin falsos positivos); verificación multiseñal |
-| Entrada | Teclado (tecla de interactuar configurable, por defecto `E`) y mando |
+| Entrada | Teclado (tecla de interactuar configurable, por defecto `E`) y mando. Abrir es **un toque**, no mantener |
 | Fin de partida | Al **morir** o **ganar**, y además al **detectar el lobby** (salida anticipada) |
 | Sesión | **Sesión = Día**. Inicio automático (al detectar partida) + botones manuales |
 | Atajos globales | Forzar nueva partida · Iniciar/Detener sesión · Mostrar/Ocultar ventana |
@@ -97,64 +97,73 @@ Herramientas de desarrollo (no se distribuyen): scripts en Python para analizar 
 
 ## 5. Señales de detección
 
-La detección **no usa machine learning ni clips de entrenamiento**. Se basa en señales del HUD aprendidas por **calibración guiada** en el equipo del propio usuario.
+La detección **no usa machine learning ni clips de entrenamiento**. Se basa en elementos del HUD.
+
+> **Verificado en el juego (vídeo del 2026-11-11, 1080p, español de Latinoamérica).** Así se abre un cofre:
+>
+> 1. Al apuntar a un contenedor aparece junto a la mira, a su derecha, un recuadro oscuro con el icono de la tecla y el texto **"BUSCAR"**.
+> 2. **Un solo toque** de la tecla arranca un **anillo de progreso alrededor del icono de la tecla**. Se completa solo en unos **0,7 s** y **no se puede cancelar**.
+> 3. El recuadro sigue visible ~0,25 s más y desaparece: el cofre queda abierto.
+> 4. Unos 0,35 s después aparecen dos avisos en posiciones fijas del HUD:
+>    - **"+600 PE / COFRE"** (a la derecha, sobre el centro). Solo salió al abrir cofres. Puede llevar líneas intermedias ("NIVEL DE ESPÍRITU") y otra cantidad (+750), pero la última línea fue siempre "COFRE".
+>    - **"+75 CONTENEDOR ABIERTO"** (banda a la derecha). Salió con cualquier contenedor, y otro aviso puede ocupar su sitio ("¡SUBISTE DE NIVEL!").
 
 | # | Señal | Qué demuestra | Cómo se obtiene |
 |---|---|---|---|
-| S1 | Prompt **"Abrir"** visible | Hay algo interactuable delante | Plantilla del prompt aprendida en calibración; OCR como respaldo y para detectar idioma |
-| S2 | **Color en la mira** | Qué objeto es (cofre y tipo, o caja de munición/puerta) | Histograma de tono (HSV) en una ROI centrada en la mira, comparado con perfiles calibrados |
-| S3 | **Tecla/botón mantenido** | El jugador está interactuando | Escucha pasiva de teclado y mando |
-| S4 | **Indicador de progreso al 100%** | La apertura se completó | Medición del llenado del círculo/barra del prompt |
-| S5 | **Confirmación posterior** | El cofre realmente se abrió | Sonido de apertura (huella espectral) y/o cambio visual en la mira (cofre abierto, botín) |
+| S1 | Recuadro **"BUSCAR"** junto a la mira | Hay un contenedor delante | Plantilla del recuadro en una zona fija a la derecha de la mira |
+| S2 | **Tipo de contenedor** | Si es cofre de tesoro, raro, de espíritus o caja de munición | Pendiente: color/aspecto en la mira y texto del aviso de experiencia (§17) |
+| S3 | **Toque de la tecla** | El jugador interactuó | Escucha pasiva de teclado y mando; basta una pulsación |
+| S4 | **Anillo de progreso** | La apertura arrancó y terminó | Arco alrededor del icono de la tecla, dentro del recuadro |
+| S5 | **Aviso de apertura** | El contenedor realmente se abrió | Avisos "+PE … COFRE" y "CONTENEDOR ABIERTO" en zonas fijas; sonido de apertura como alternativa |
 
 > Se exigen tres tipos de prueba independientes: **lo que se ve** (S1, S2, S4), **lo que hace el jugador** (S3) y **lo que ocurre después** (S5).
 
 ### Otras detecciones (contexto de partida)
 
-| Evento | Señal | Frecuencia de análisis |
+| Evento | Señal vista en el vídeo | Frecuencia de análisis |
 |---|---|---|
-| Inicio de partida | HUD de partida presente (minimapa/barra de vida) tras el autobús | 1 fps |
-| Eliminación | Pantalla/texto de eliminación (OCR) | 2 fps |
-| Victoria | Texto "Victoria Magistral" / equivalente por idioma (OCR) | 2 fps |
-| Lobby | Pantalla de lobby (botón "Jugar"/"Play" y ausencia de HUD de partida) | 1 fps |
+| Lobby | Panel "BATTLE ROYALE" con "Buscando servidor" / botón "CANCELAR" | 1 fps |
+| Inicio de partida | HUD de partida presente (minimapa arriba a la derecha, barra de vida abajo a la izquierda) | 1 fps |
+| Eliminación | "QUEDASTE N.º" arriba y "TE ELIMINÓ …" abajo | 2 fps |
+| Fin de partida | Pantalla con "JUGAR DE NUEVO" / "REGRESAR A LA SALA" | 1 fps |
+| Victoria | Sin verificar todavía | 2 fps |
 
 ## 6. Máquina de estados de apertura
 
 ```
 [REPOSO]
-   │  S1 prompt "Abrir" visible  Y  S2 color de cofre en la mira
+   │  S1 recuadro "BUSCAR" visible  Y  S2 contenedor reconocido
    ▼
-[COFRE_A_LA_VISTA]  ← se fija el tipo (normal / raro / espíritu / jefe)
-   │  S3 tecla/botón pulsado
+[A_LA_VISTA]  ← se fija el tipo (tesoro / raro / espíritus / munición)
+   │  S3 toque de tecla (si hay escucha)  Y  S4 el anillo arranca
    ▼
-[ABRIENDO]  ← se sigue el llenado del indicador (S4)
+[ABRIENDO]  ← el anillo avanza solo
    │
-   ├─ se suelta la tecla antes del 100%          → REPOSO   (no cuenta)
-   ├─ el prompt desaparece antes del 100%        → REPOSO   (no cuenta)
-   ├─ el color en la mira deja de ser de cofre   → REPOSO   (no cuenta)
+   ├─ el anillo no termina ni desaparece en 3 s   → no cuenta (se guarda en depuración)
    │
-   │  S4 indicador = 100%  Y  prompt desaparece
+   │  S4 anillo completo   O   el recuadro deja de verse (el jugador giró la cámara;
+   │                           la apertura no se cancela)
    ▼
-[VERIFICANDO]  (ventana ≈ 1 s)
+[VERIFICANDO]  (ventana de 1,5 s)
    │
-   ├─ sin S5                                     → REPOSO   (no cuenta; se guarda en depuración)
+   ├─ sin S5                                      → no cuenta (se guarda en depuración)
    │
-   │  S5 sonido de apertura  Y/O  cambio visual en la mira
+   │  el recuadro ha desaparecido  Y  S5 aviso de apertura (o sonido)
    ▼
-[CONTAR +1 (tipo)] → cooldown → REPOSO
+[CONTAR +1 (tipo)] → pausa de 0,5 s → REPOSO
 ```
 
 ### Casos que nunca suben el contador
 
 | Situación | Motivo |
 |---|---|
-| Mantener `E` sin apuntar a nada | No hay S1 |
-| Mantener `E` frente a una caja de munición | S2 no es de cofre |
-| Abrir una puerta (también dice "Abrir") | No hay indicador que llegue al 100% y S2 no es de cofre |
-| Empezar a abrir y soltar | S4 no llega al 100% |
-| Alejarse a mitad de la apertura | El prompt desaparece antes del 100% |
-| Mantener `E` pegado mucho tiempo | Una aparición del prompt equivale como máximo a una apertura |
-| El mismo cofre "parpadea" en pantalla | Cooldown y un cofre abierto ya no muestra el prompt |
+| Pulsar la tecla sin apuntar a nada | No hay S1 |
+| Abrir una puerta o recoger un arma | S2 no es un contenedor de los que se cuentan |
+| Pulsar frente a un cofre sin que arranque el anillo | No hay S4 |
+| Anillo en pantalla sin haber visto el toque de tecla (habiendo escucha) | Falta S3 |
+| Mirar un cofre con el aviso del anterior aún en pantalla | El aviso solo vale después de una apertura |
+| Aviso que llega fuera de plazo | Ventana de verificación agotada |
+| El mismo cofre "parpadea" en pantalla | Pausa tras contar y un cofre abierto ya no muestra el recuadro |
 
 ### Rendimiento
 
@@ -200,7 +209,7 @@ CREATE TABLE chest_events (
   ts          INTEGER NOT NULL,
   match_id    INTEGER REFERENCES matches(id),
   session_id  INTEGER REFERENCES sessions(id),
-  chest_type  TEXT NOT NULL,             -- 'normal','rare','spirit','boss'; sin CHECK (los tipos cambian por temporada)
+  chest_type  TEXT NOT NULL,             -- 'normal' (tesoro),'rare','spirit','ammo'; sin CHECK (los tipos cambian por temporada)
   confidence  REAL NOT NULL,
   signals     INTEGER NOT NULL           -- máscara de bits de S1..S5 presentes
 );
@@ -227,7 +236,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- versión de esquema, e
 
 - Modo **WAL** y escrituras por evento (unas pocas por minuto): impacto en disco inapreciable.
 - La base (`chests.db`) se guarda en la carpeta de datos que Tauri asigna al identificador de la app (`%APPDATA%\io.github.jaimecardonagz.fortnitechestcounter\` / `~/.local/share/io.github.jaimecardonagz.fortnitechestcounter/`), no junto al ejecutable.
-- **Ajuste manual**: el histórico se puede corregir a mano (cofres abiertos antes de instalar la app, o correcciones), por tipo o sin clasificar. Se guarda como ajuste aparte, no como eventos falsos, y ningún tipo puede quedar por debajo de cero. No afecta a la partida ni a la sesión.
+- **Ajuste manual**: el histórico se puede corregir a mano (cofres abiertos antes de instalar la app, o correcciones), por tipo. Se guarda como ajuste aparte, no como eventos falsos, y ningún tipo puede quedar por debajo de cero. No afecta a la partida ni a la sesión.
 - **Contador de partidas**: se muestran las partidas de la sesión activa y las de siempre. Cuenta toda partida registrada, también las forzadas a mano y las interrumpidas. El total histórico de partidas admite el mismo ajuste manual que los cofres.
 - **Cierre inesperado**: al arrancar, las partidas que quedaron abiertas se cierran como `interrupted` con la hora de su último cofre. La sesión abierta se reanuda si su última actividad está dentro del periodo de inactividad; si no, se cierra en esa última actividad.
 - `confidence` es la fracción de las señales S1..S5 presentes al contar (1.0 con las cinco; 0.8 sin S3).
@@ -388,11 +397,16 @@ Los botones equivalentes actúan con 5 s de retardo, para dar tiempo a volver al
 
 ## 17. Pendiente de verificar en el juego
 
-- Aspecto exacto del prompt "Abrir" y de su indicador de progreso.
-- Si el sonido de apertura difiere entre tipos de cofre y respecto a la caja de munición.
-- Colores reales de cofres de espíritu y de jefe/bóveda en la temporada actual.
-- Textos/pantallas de eliminación, victoria y lobby en cada idioma soportado.
-- Texto real del prompt del cofre (posiblemente "Buscar" y no "Abrir") y si coincide con el de las puertas.
+Resuelto con el vídeo del 2026-11-11: aspecto del prompt ("BUSCAR", no "Abrir") y de su anillo de progreso, tiempos de apertura, avisos de confirmación, y pantallas de lobby y eliminación (§5).
+
+Sigue pendiente:
+
+- **Si el aviso "+PE COFRE" sale con todos los cofres y durante toda la partida**, o si depende del espíritu equipado ("Saqueacofres afortunado") o tiene un límite.
+- **Cómo distinguir los tres tipos de cofre.** Los cuatro cofres del vídeo eran del mismo tipo; faltan ejemplos de los otros dos y de una caja de munición vista de frente.
+- **Qué muestra la caja de munición**: si su recuadro también dice "BUSCAR" y qué aviso sale al abrirla.
+- **Cómo se ve todo en el equipo de pruebas** (GeForce Now a 1366×768): el vídeo es de 1080p, así que posiciones y tamaños hay que reescalarlos y comprobarlos con las capturas del diagnóstico.
+- Sonido de apertura (el vídeo lo incluye; sin analizar todavía).
+- Pantalla de victoria.
 
 ### Decisiones de diseño abiertas (cerrar en la fase V)
 
@@ -402,7 +416,7 @@ Los botones equivalentes actúan con 5 s de retardo, para dar tiempo a volver al
 
 ### Decisiones ya implementadas (revisables)
 
-- **Combinación mínima de señales**: para contar se exigen S1 + S2 + S4 completo + desaparición del prompt + al menos una confirmación S5 (sonido **o** cambio visual) dentro de 1 s. S3 se exige solo si hay escucha de entrada disponible. Una confirmación anterior a que el indicador se complete no vale.
+- **Combinación mínima de señales**: para contar se exigen S1 + S2 + anillo arrancado (S4) + desaparición del recuadro + al menos una confirmación S5 (aviso **o** sonido) dentro de 1,5 s. S3 se exige solo si hay escucha de entrada disponible. Una confirmación anterior a que termine el anillo no vale.
 - **"HOY"** muestra la sesión activa (una sesión que cruza la medianoche sigue siendo una); sin sesión activa muestra cero.
 - **"PARTIDA"** muestra la partida en curso o, al terminar, la última de la sesión hasta que empiece otra.
 - **Cofre sin partida detectada**: si se cuenta un cofre sin haber detectado el inicio de partida, se abre partida (y sesión) en ese momento.

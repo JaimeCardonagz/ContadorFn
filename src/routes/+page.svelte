@@ -3,7 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
 
-  type Counts = { normal: number; rare: number; spirit: number; boss: number; total: number };
+  type Counts = { normal: number; rare: number; spirit: number; ammo: number; total: number };
   type Stats = {
     inMatch: boolean;
     sessionActive: boolean;
@@ -62,7 +62,7 @@
   });
 
   function breakdown(c: Counts) {
-    return `Normal ${c.normal} · Raro ${c.rare} · Espíritu ${c.spirit} · Jefe ${c.boss}`;
+    return `Tesoro ${c.normal} · Raro ${c.rare} · Espíritu ${c.spirit} · Munición ${c.ammo}`;
   }
 
   function elapsed(since: number | null) {
@@ -73,7 +73,7 @@
   }
 
   // Ajuste manual del histórico: cofres abiertos antes de usar la app, o correcciones.
-  let adjustType = $state("");
+  let adjustType = $state("normal");
   let adjustAmount = $state<number | null>(null);
 
   async function adjust() {
@@ -81,17 +81,17 @@
     if (adjustType === "matches") {
       await run("adjust_matches", { delta: adjustAmount });
     } else {
-      await run("adjust_total", { chest: adjustType || null, delta: adjustAmount });
+      await run("adjust_total", { chest: adjustType, delta: adjustAmount });
     }
     if (!error) adjustAmount = null;
   }
 
   const simulated = [
     ["match_start", "Inicia partida"],
-    ["normal", "+ Normal"],
+    ["normal", "+ Tesoro"],
     ["rare", "+ Raro"],
     ["spirit", "+ Espíritu"],
-    ["boss", "+ Jefe"],
+    ["ammo", "+ Munición"],
     ["eliminated", "Eliminado"],
     ["victory", "Victoria"],
     ["lobby", "Lobby"],
@@ -133,11 +133,10 @@
     <form onsubmit={(e) => (e.preventDefault(), adjust())}>
       <label for="ajuste">Ajustar histórico</label>
       <select bind:value={adjustType}>
-        <option value="">Cofres sin tipo</option>
-        <option value="normal">Cofres normales</option>
+        <option value="normal">Cofres de tesoro</option>
         <option value="rare">Cofres raros</option>
-        <option value="spirit">Cofres de espíritu</option>
-        <option value="boss">Cofres de jefe</option>
+        <option value="spirit">Cofres de espíritus</option>
+        <option value="ammo">Cajas de munición</option>
         <option value="matches">Partidas</option>
       </select>
       <input id="ajuste" type="number" step="1" placeholder="±cantidad" bind:value={adjustAmount} />

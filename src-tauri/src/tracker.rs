@@ -132,7 +132,7 @@ impl Tracker {
 
     /// Ajuste manual del histórico; no toca la partida ni la sesión.
     /// Devuelve `false` si dejaría el contador de ese tipo en negativo.
-    pub fn adjust_total(&mut self, now: i64, chest: Option<ChestType>, delta: i64) -> Result<bool> {
+    pub fn adjust_total(&mut self, now: i64, chest: ChestType, delta: i64) -> Result<bool> {
         self.store.adjust_total(now, chest, delta)
     }
 
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(s.session_started_at, Some(1_000));
         for c in [s.match_counts, s.session_counts, s.total_counts] {
             assert_eq!(
-                (c.normal, c.rare, c.spirit, c.boss, c.total),
+                (c.normal, c.rare, c.spirit, c.ammo, c.total),
                 (2, 1, 0, 0, 3)
             );
         }
@@ -237,7 +237,7 @@ mod tests {
 
         t.match_started(4_000).unwrap();
         chest(&mut t, 5_000, ChestType::Spirit);
-        chest(&mut t, 6_000, ChestType::Boss);
+        chest(&mut t, 6_000, ChestType::Rare);
         let s = t.stats().unwrap();
         assert_eq!(s.match_counts.total, 2);
         assert_eq!(s.session_counts.total, 3);
@@ -351,28 +351,27 @@ mod tests {
     fn el_ajuste_manual_solo_afecta_al_historico() {
         let mut t = tracker();
         chest(&mut t, 1_000, ChestType::Normal);
-        assert!(t.adjust_total(2_000, Some(ChestType::Rare), 40).unwrap());
-        assert!(t.adjust_total(2_000, None, 300).unwrap());
+        assert!(t.adjust_total(2_000, ChestType::Rare, 40).unwrap());
+        assert!(t.adjust_total(2_000, ChestType::Spirit, 300).unwrap());
 
         let s = t.stats().unwrap();
         assert_eq!(s.match_counts.total, 1);
         assert_eq!(s.session_counts.total, 1);
         let c = s.total_counts;
-        assert_eq!((c.normal, c.rare, c.total), (1, 40, 341));
+        assert_eq!((c.normal, c.rare, c.spirit, c.total), (1, 40, 300, 341));
     }
 
     #[test]
     fn el_ajuste_manual_puede_restar_pero_no_bajar_de_cero() {
         let mut t = tracker();
         chest(&mut t, 1_000, ChestType::Normal);
-        t.adjust_total(2_000, Some(ChestType::Normal), 9).unwrap();
+        t.adjust_total(2_000, ChestType::Normal, 9).unwrap();
 
-        assert!(t.adjust_total(3_000, Some(ChestType::Normal), -4).unwrap());
+        assert!(t.adjust_total(3_000, ChestType::Normal, -4).unwrap());
         assert_eq!(t.stats().unwrap().total_counts.normal, 6);
 
-        assert!(!t.adjust_total(4_000, Some(ChestType::Normal), -7).unwrap());
-        assert!(!t.adjust_total(4_000, Some(ChestType::Boss), -1).unwrap());
-        assert!(!t.adjust_total(4_000, None, -1).unwrap());
+        assert!(!t.adjust_total(4_000, ChestType::Normal, -7).unwrap());
+        assert!(!t.adjust_total(4_000, ChestType::Ammo, -1).unwrap());
         let c = t.stats().unwrap().total_counts;
         assert_eq!(
             (c.normal, c.total),
@@ -384,7 +383,7 @@ mod tests {
     #[test]
     fn el_ajuste_manual_sobrevive_a_un_reinicio() {
         let mut t = tracker();
-        t.adjust_total(1_000, None, 250).unwrap();
+        t.adjust_total(1_000, ChestType::Normal, 250).unwrap();
         let t = Tracker::new(t.into_store(), 2_000, HOUR).unwrap();
         assert_eq!(t.stats().unwrap().total_counts.total, 250);
     }
@@ -426,5 +425,19 @@ mod tests {
 
         let t = Tracker::new(t.into_store(), 5_000, HOUR).unwrap();
         assert_eq!(t.stats().unwrap().total_matches, 50);
+    }
+
+    #[test]
+    fn la_municion_se_cuenta_aparte_y_no_suma_a_los_cofres() {
+        let mut t = tracker();
+        chest(&mut t, 1_000, ChestType::Normal);
+        chest(&mut t, 2_000, ChestType::Ammo);
+        chest(&mut t, 3_000, ChestType::Ammo);
+        t.adjust_total(4_000, ChestType::Ammo, 10).unwrap();
+
+        let s = t.stats().unwrap();
+        assert_eq!((s.match_counts.ammo, s.match_counts.total), (2, 1));
+        assert_eq!((s.session_counts.ammo, s.session_counts.total), (2, 1));
+        assert_eq!((s.total_counts.ammo, s.total_counts.total), (12, 1));
     }
 }

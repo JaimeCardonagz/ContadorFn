@@ -23,3 +23,6 @@ Thumbs.db
 
 # Ejecutables descargados de GitHub Actions
 artifacts/
+
+# Clips y capturas del juego (locales, no se suben)
+Debug/

@@ -63,7 +63,7 @@ fn new_match(app: AppHandle) -> Result<Stats, String> {
 
 /// Suma (o resta, con `delta` negativo) cofres al histórico a mano.
 #[tauri::command]
-fn adjust_total(app: AppHandle, chest: Option<ChestType>, delta: i64) -> Result<Stats, String> {
+fn adjust_total(app: AppHandle, chest: ChestType, delta: i64) -> Result<Stats, String> {
     let mut accepted = false;
     let stats = update(&app, |t, now| {
         accepted = t.adjust_total(now, chest, delta)?;
@@ -108,7 +108,7 @@ fn debug_simulate(app: AppHandle, event: String) -> Result<Stats, String> {
         "normal" => chest(ChestType::Normal),
         "rare" => chest(ChestType::Rare),
         "spirit" => chest(ChestType::Spirit),
-        "boss" => chest(ChestType::Boss),
+        "ammo" => chest(ChestType::Ammo),
         "match_start" => update(&app, |t, now| t.match_started(now)),
         "eliminated" => update(&app, |t, now| t.match_ended(now, EndReason::Eliminated)),
         "victory" => update(&app, |t, now| t.match_ended(now, EndReason::Victory)),
