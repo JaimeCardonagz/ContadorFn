@@ -328,6 +328,18 @@ ContadorFn/
 
 ## 14. Modo depuración y pruebas
 
+### Diagnóstico (implementado)
+
+Antes de escribir la detección hay que saber qué puede ver la app en el equipo real. La ventana incluye un panel de diagnóstico que comprueba tres cosas y deja los datos en `Imágenes\FortniteChestCounter\`:
+
+- **Captura de pantalla.** `F8` guarda una captura sin pérdida (PNG) de lo que recibe la app y avisa si sale negra. De momento se usa **GDI (BitBlt)** sobre el monitor principal, por ser lo más simple; si con GeForce Now saliera negra, se pasa a DXGI Desktop Duplication (§3).
+- **Ráfaga.** `F9` empieza o detiene una ráfaga de hasta 10 s a ~15 fps (JPEG) con un `frames.csv` que anota en cada frame el instante y si `E` estaba pulsada. Estas ráfagas son la materia prima para medir el prompt y el indicador, y luego sirven de casos de test.
+- **Teclado y atajos.** Muestra en vivo si ve la tecla `E`, y cuenta por separado las pulsaciones de `F8`/`F9` que llegan leyendo el teclado y las que llegan como atajo global del sistema, para saber cuál de las dos vías funciona con el juego en primer plano.
+
+Los botones equivalentes actúan con 5 s de retardo, para dar tiempo a volver al juego. Todo queda anotado en `diagnostico.log`.
+
+### Modo depuración (previsto)
+
 - Con el modo depuración activo, la app guarda localmente, por cada evento **contado o descartado en VERIFICANDO**:
   - las ROIs de los frames clave;
   - la máscara de señales;

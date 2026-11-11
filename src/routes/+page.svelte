@@ -15,7 +15,23 @@
     totalMatches: number;
   };
 
+  type Diag = {
+    supported: boolean;
+    dir: string;
+    eDown: boolean;
+    ePresses: number;
+    pollHits: number;
+    hotkeyHits: number;
+    hotkeyError: string | null;
+    pendingIn: number | null;
+    recording: boolean;
+    frames: number;
+    lastResult: { ok: boolean; message: string } | null;
+  };
+
   let stats = $state<Stats | null>(null);
+  let diag = $state<Diag | null>(null);
+  let thumbnail = $state("");
   let debug = $state(false);
   let error = $state("");
   let now = $state(Date.now());
@@ -32,10 +48,15 @@
   onMount(() => {
     run("get_stats");
     invoke<boolean>("is_debug").then((value) => (debug = value));
-    const unlisten = listen<Stats>("stats-changed", (event) => (stats = event.payload));
+    invoke<Diag>("get_diag").then((value) => (diag = value));
+    const listeners = [
+      listen<Stats>("stats-changed", (event) => (stats = event.payload)),
+      listen<Diag>("diag-state", (event) => (diag = event.payload)),
+      listen<string>("diag-thumbnail", (event) => (thumbnail = event.payload)),
+    ];
     const timer = setInterval(() => (now = Date.now()), 1000);
     return () => {
-      unlisten.then((stop) => stop());
+      for (const listener of listeners) listener.then((stop) => stop());
       clearInterval(timer);
     };
   });
@@ -123,6 +144,40 @@
       <button type="submit" disabled={!adjustAmount}>Aplicar</button>
     </form>
 
+    {#if diag}
+      <section>
+        <div class="fila"><span>DIAGNÓSTICO</span></div>
+        {#if !diag.supported}
+          <small class="linea error">La captura y el teclado solo funcionan en Windows.</small>
+        {/if}
+        <small class="linea">
+          Tecla E: <b>{diag.eDown ? "PULSADA" : "suelta"}</b> · pulsaciones vistas: {diag.ePresses}
+        </small>
+        <small class="linea">
+          F8/F9 leyendo el teclado: {diag.pollHits} · como atajo global: {diag.hotkeyHits}
+        </small>
+        {#if diag.hotkeyError}
+          <small class="linea error">Atajo global no disponible: {diag.hotkeyError}</small>
+        {/if}
+        <nav>
+          <button onclick={() => invoke("diag_shot")}>Captura en 5 s (F8)</button>
+          <button onclick={() => invoke("diag_burst")}>
+            {diag.recording ? "Detener ráfaga (F9)" : "Ráfaga en 5 s (F9)"}
+          </button>
+          <button onclick={() => invoke("open_captures_dir").catch((e) => (error = String(e)))}>
+            Abrir carpeta
+          </button>
+        </nav>
+        {#if diag.pendingIn}<small class="linea">Empieza en {diag.pendingIn} s…</small>{/if}
+        {#if diag.recording}<small class="linea">Grabando: {diag.frames} frames</small>{/if}
+        {#if diag.lastResult}
+          <small class="linea" class:error={!diag.lastResult.ok}>{diag.lastResult.message}</small>
+        {/if}
+        {#if thumbnail}<img src={thumbnail} alt="Última captura" />{/if}
+        <small class="linea">{diag.dir}</small>
+      </section>
+    {/if}
+
     {#if debug}
       <nav class="debug">
         {#each simulated as [event, label]}
@@ -186,6 +241,14 @@
 
   .linea {
     display: block;
+    overflow-wrap: anywhere;
+  }
+
+  img {
+    display: block;
+    max-width: 100%;
+    margin: 6px 0;
+    border: 1px solid #3a4050;
   }
 
   nav {

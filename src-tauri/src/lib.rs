@@ -1,20 +1,25 @@
 // El detector aún no está conectado a ninguna fuente de señales (captura,
 // audio, entrada), así que por ahora solo lo usan sus pruebas.
+mod capture;
 #[allow(dead_code)]
 mod detect;
+mod diag;
+mod input;
 mod store;
 mod tracker;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use diag::{Diag, DiagState};
 use store::{ChestType, EndReason, Store};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use tracker::{DEFAULT_INACTIVITY_MS, Stats, Tracker};
 
 struct AppState(Mutex<Tracker>);
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)
@@ -112,6 +117,60 @@ fn debug_simulate(app: AppHandle, event: String) -> Result<Stats, String> {
     }
 }
 
+/// Retardo de las acciones pedidas con un botón, para dar tiempo a volver al juego.
+const BUTTON_DELAY_MS: i64 = 5_000;
+
+#[tauri::command]
+fn get_diag(diag: State<Arc<Diag>>) -> DiagState {
+    diag.snapshot()
+}
+
+#[tauri::command]
+fn diag_shot(diag: State<Arc<Diag>>) {
+    diag.request_shot(BUTTON_DELAY_MS);
+}
+
+#[tauri::command]
+fn diag_burst(diag: State<Arc<Diag>>) {
+    diag.request_burst(BUTTON_DELAY_MS);
+}
+
+#[tauri::command]
+fn open_captures_dir(diag: State<Arc<Diag>>) -> Result<(), String> {
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(diag.dir())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Registra F8 y F9 como atajos globales del sistema. Es una vía distinta de
+/// la consulta del teclado: el diagnóstico muestra cuál de las dos funciona.
+fn register_hotkeys(app: &AppHandle, diag: &Arc<Diag>) -> Result<(), String> {
+    let handler = diag.clone();
+    app.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(move |_app, shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    handler.hotkey(shortcut.key == Code::F9);
+                }
+            })
+            .build(),
+    )
+    .map_err(|e| e.to_string())?;
+    for key in [Code::F8, Code::F9] {
+        app.global_shortcut()
+            .register(Shortcut::new(None, key))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -121,6 +180,20 @@ pub fn run() {
             let store = Store::open(&dir.join("chests.db"))?;
             let tracker = Tracker::new(store, now_ms(), DEFAULT_INACTIVITY_MS)?;
             app.manage(AppState(Mutex::new(tracker)));
+
+            // Diagnóstico: capturas en Imágenes/FortniteChestCounter.
+            let captures = app
+                .path()
+                .picture_dir()
+                .unwrap_or(dir)
+                .join("FortniteChestCounter");
+            std::fs::create_dir_all(&captures)?;
+            let diag = Diag::new(captures);
+            app.manage(diag.clone());
+            if let Err(error) = register_hotkeys(app.handle(), &diag) {
+                diag.set_hotkey_error(error);
+            }
+            diag::spawn(app.handle().clone(), diag);
 
             // Cierre de sesión por inactividad.
             let handle = app.handle().clone();
@@ -149,6 +222,10 @@ pub fn run() {
             adjust_matches,
             is_debug,
             debug_simulate,
+            get_diag,
+            diag_shot,
+            diag_burst,
+            open_captures_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

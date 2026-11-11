@@ -7,7 +7,10 @@
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../build"
+    "frontendDist": "../build",
+    "features": [
+      "bundled-sqlite"
+    ]
   },
   "app": {
     "windows": [
@@ -15,7 +18,7 @@
         "label": "main",
         "title": "Fortnite Chest Counter",
         "width": 340,
-        "height": 480,
+        "height": 680,
         "minWidth": 260,
         "minHeight": 200,
         "alwaysOnTop": true,
