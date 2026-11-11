@@ -21,7 +21,7 @@ Aplicación de escritorio **ligera, portable y de código abierto** que cuenta a
 | Variaciones de HUD | Escala de HUD personalizada, idioma del juego distinto al español |
 | Categorías | **Cofre de tesoro**, **cofre raro**, **cofre de espíritus** y **caja de munición**. La munición se cuenta aparte y no suma al total de cofres. Cofres de jefe y cualquier otro objeto: **ignorados** |
 | Precisión | Objetivo: **exactitud total** (sin falsos positivos); verificación multiseñal |
-| Entrada | Teclado (tecla de interactuar configurable, por defecto `E`) y mando. Abrir es **un toque**, no mantener |
+| Entrada | En Configuración el usuario indica con qué abre los cofres: una **tecla**, un **botón del ratón** o un **botón del mando** (por defecto la tecla `E`). Abrir es **un toque**, no mantener |
 | Fin de partida | Al **morir** o **ganar**, y además al **detectar el lobby** (salida anticipada) |
 | Sesión | **Sesión = Día**. Inicio automático (al detectar partida) + botones manuales |
 | Atajos globales | Forzar nueva partida · Iniciar/Detener sesión · Mostrar/Ocultar ventana |
@@ -29,7 +29,8 @@ Aplicación de escritorio **ligera, portable y de código abierto** que cuenta a
 | Streaming | Ocultar ventana en OBS/capturas: **configurable** |
 | Persistencia | **SQLite** local, sin servidor |
 | Exportación / nube | No en v1 |
-| Idioma de la app | Español + Inglés |
+| Idioma de la app | Español + Inglés (implementado; se elige en Configuración y por defecto sigue al sistema) |
+| Idioma del juego | Español de Latinoamérica (implementado). Inglés: pendiente de capturas del juego en inglés para crear sus plantillas |
 | Distribución | **Portable**, GitHub Releases, licencia **MIT**, aviso de nueva versión, plantillas/calibraciones actualizables |
 | Audiencia | Amigos / comunidad pequeña (sin firma de código en v1) |
 
@@ -117,6 +118,19 @@ La detección **no usa machine learning ni clips de entrenamiento**. Se basa en 
 | S5 | **Aviso de apertura** | El contenedor realmente se abrió | El mismo aviso de experiencia que da el tipo, en su zona fija. "CONTENEDOR ABIERTO" no se usa: no distingue tipos y otros avisos lo tapan |
 
 > Se exigen tres tipos de prueba independientes: **lo que se ve antes** (S1, S4), **lo que hace el jugador** (S3) y **lo que ocurre después** (S2 + S5, que llegan juntas en el aviso).
+
+> **Sonido descartado** (decisión del usuario, 2026-11-11): el sonido de apertura no se usará. El aviso visual confirma la apertura y da el tipo, así que no hace falta.
+
+### El botón de abrir (S3) en la versión actual
+
+- La app consulta unas 30 veces por segundo si el botón configurado está pulsado (teclado y ratón con `GetAsyncKeyState`, mando con XInput) y recuerda la última pulsación.
+- Cada detección anota si hubo una pulsación en los **4 s anteriores** al aviso. Eso sube su confianza y queda en el registro.
+- La opción **"Contar solo si pulsé ese botón justo antes"** lo vuelve obligatorio. Viene desactivada porque falta comprobar que las pulsaciones se ven con GeForce Now en primer plano; si no se vieran, activarla dejaría el contador a cero.
+- El botón por sí solo **no distingue** dos aperturas seguidas del mismo tipo: tras abrir un cofre se pulsa el mismo botón para recoger el botín. Eso lo resolverán el recuadro "BUSCAR" y el anillo.
+
+### Idioma del juego
+
+Las plantillas del aviso son texto, así que cada idioma del juego necesita las suyas. Hoy solo existen las de español de Latinoamérica. Para el **inglés** hacen falta cuatro capturas con el juego en inglés (un aviso de cada tipo); también sirven los recortes `…-desconocido.png` que la app guarda sola al jugar en inglés.
 
 ### Otras detecciones (contexto de partida)
 

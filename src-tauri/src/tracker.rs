@@ -2,6 +2,7 @@
 //!
 //! Todas las funciones reciben `now` (epoch ms) para poder probarse sin reloj.
 
+use crate::settings::Settings;
 use crate::store::{ChestType, Counts, EndReason, Scope, Store};
 use rusqlite::Result;
 use serde::Serialize;
@@ -134,6 +135,14 @@ impl Tracker {
     /// Devuelve `false` si dejaría el contador de ese tipo en negativo.
     pub fn adjust_total(&mut self, now: i64, chest: ChestType, delta: i64) -> Result<bool> {
         self.store.adjust_total(now, chest, delta)
+    }
+
+    pub fn settings(&self) -> Result<Settings> {
+        Ok(Settings::from_json(self.store.meta("settings")?.as_deref()))
+    }
+
+    pub fn save_settings(&mut self, settings: &Settings) -> Result<()> {
+        self.store.set_meta("settings", &settings.to_json())
     }
 
     /// Ajuste manual del total de partidas; no toca la sesión.
@@ -439,5 +448,24 @@ mod tests {
         assert_eq!((s.match_counts.ammo, s.match_counts.total), (2, 1));
         assert_eq!((s.session_counts.ammo, s.session_counts.total), (2, 1));
         assert_eq!((s.total_counts.ammo, s.total_counts.total), (12, 1));
+    }
+
+    #[test]
+    fn los_ajustes_se_guardan_y_sobreviven_a_un_reinicio() {
+        use crate::settings::Binding;
+        let mut t = tracker();
+        assert_eq!(t.settings().unwrap(), Settings::default());
+
+        let mut settings = Settings {
+            binding: Binding::Pad { button: 2 },
+            language: "en".into(),
+            ..Default::default()
+        };
+        t.save_settings(&settings).unwrap();
+        settings.require_input = true;
+        t.save_settings(&settings).unwrap(); // guardar dos veces reemplaza
+
+        let t = Tracker::new(t.into_store(), 1_000, HOUR).unwrap();
+        assert_eq!(t.settings().unwrap(), settings);
     }
 }

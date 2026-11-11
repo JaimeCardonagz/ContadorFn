@@ -5,6 +5,8 @@
 //! Si con GeForce Now saliera en negro, el paso siguiente es DXGI Desktop
 //! Duplication (ARQUITECTURA.md §3).
 
+use crate::settings::tr;
+
 /// Una imagen en RGB de 8 bits, fila a fila desde arriba.
 pub struct Frame {
     pub width: u32,
@@ -20,12 +22,21 @@ pub fn grab_screen() -> Result<Frame, String> {
 
 #[cfg(not(windows))]
 pub fn screen_size() -> Result<(u32, u32), String> {
-    Err("La captura de pantalla solo está implementada en Windows.".into())
+    Err(unsupported())
 }
 
 #[cfg(not(windows))]
 pub fn grab_rect(_x: u32, _y: u32, _width: u32, _height: u32) -> Result<Frame, String> {
-    Err("La captura de pantalla solo está implementada en Windows.".into())
+    Err(unsupported())
+}
+
+#[cfg(not(windows))]
+fn unsupported() -> String {
+    tr(
+        "La captura de pantalla solo está implementada en Windows.",
+        "Screen capture is only implemented on Windows.",
+    )
+    .into()
 }
 
 /// Tamaño en píxeles del monitor principal.
@@ -36,7 +47,10 @@ pub fn screen_size() -> Result<(u32, u32), String> {
     // SAFETY: GetSystemMetrics no tiene precondiciones.
     let (width, height) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
     if width <= 0 || height <= 0 {
-        return Err(format!("Tamaño de pantalla no válido: {width}x{height}"));
+        return Err(format!(
+            "{}: {width}x{height}",
+            tr("Tamaño de pantalla no válido", "Invalid screen size")
+        ));
     }
     Ok((width as u32, height as u32))
 }
@@ -50,7 +64,7 @@ pub fn grab_rect(x: u32, y: u32, width: u32, height: u32) -> Result<Frame, Strin
     };
 
     if width == 0 || height == 0 {
-        return Err("Rectángulo de captura vacío.".into());
+        return Err(tr("Rectángulo de captura vacío.", "Empty capture rectangle.").into());
     }
     let (w, h) = (width as i32, height as i32);
 
@@ -59,7 +73,11 @@ pub fn grab_rect(x: u32, y: u32, width: u32, height: u32) -> Result<Frame, Strin
     unsafe {
         let screen = GetDC(None);
         if screen.is_invalid() {
-            return Err("No se pudo acceder a la pantalla (GetDC).".into());
+            return Err(tr(
+                "No se pudo acceder a la pantalla (GetDC).",
+                "Could not access the screen (GetDC).",
+            )
+            .into());
         }
         let memory = CreateCompatibleDC(Some(screen));
         let bitmap = CreateCompatibleBitmap(screen, w, h);
@@ -109,10 +127,16 @@ pub fn grab_rect(x: u32, y: u32, width: u32, height: u32) -> Result<Frame, Strin
         let _ = DeleteDC(memory);
         ReleaseDC(None, screen);
 
-        copied.map_err(|e| format!("No se pudo copiar la pantalla (BitBlt): {e}"))?;
+        copied.map_err(|e| {
+            format!(
+                "{} (BitBlt): {e}",
+                tr("No se pudo copiar la pantalla", "Could not copy the screen")
+            )
+        })?;
         if lines != h {
-            return Err(format!(
-                "Lectura incompleta de la pantalla: {lines} de {h} líneas."
+            return Err(tr(
+                format!("Lectura incompleta de la pantalla: {lines} de {h} líneas."),
+                format!("Incomplete screen read: {lines} of {h} lines."),
             ));
         }
 

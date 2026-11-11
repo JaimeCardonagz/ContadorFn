@@ -8,7 +8,7 @@
 //! recuadro "BUSCAR" y el anillo (`detect.rs`), que distinguen cada apertura.
 
 use crate::capture::{self, Frame};
-use crate::detect::{S2_TYPE, S5_NOTICE};
+use crate::detect::{S2_TYPE, S3_INPUT, S5_NOTICE};
 use crate::diag::Diag;
 use crate::notice::{self, Reading};
 use crate::now_ms;
@@ -27,6 +27,9 @@ const CLEAR_FRAMES: u32 = 5;
 /// Avisos desconocidos que se guardan como muestra, como mucho, por ejecución.
 const MAX_UNKNOWN_SAMPLES: u32 = 200;
 const UNKNOWN_SAMPLE_GAP_MS: i64 = 3_000;
+/// El botón de abrir cuenta como pulsado para un aviso si se pulsó en este
+/// margen antes de verlo (anillo ~0,7 s + ~0,6 s hasta el aviso, con holgura).
+const INPUT_WINDOW_MS: i64 = 4_000;
 
 /// Convierte lecturas sucesivas del aviso en aperturas: una por cada aviso
 /// nuevo, no una por cada frame en que se ve.
@@ -119,15 +122,27 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
             let reading = notice::read(&roi);
             let now = now_ms();
             if let Some(kind) = counter.step(reading.kind()) {
-                // Solo intervienen S2 y S5: 2 de las 5 señales.
-                let counted = crate::update(&app, |tracker, now| {
-                    tracker.chest_opened(now, kind, 0.4, S2_TYPE | S5_NOTICE)
-                });
-                match counted {
-                    Ok(_) => diag.detected(kind.as_str()),
-                    Err(error) => diag.log(&format!("no se pudo guardar el cofre: {error}")),
+                let pressed = diag.pressed_within(INPUT_WINDOW_MS);
+                let name = kind.as_str();
+                if diag.require_input() && !pressed {
+                    diag.log(&format!("descartado: aviso de {name} sin pulsación previa"));
+                    save(&roi, format!("{now}-{name}-sin-boton.png"));
+                } else {
+                    // Intervienen S2 y S5, y S3 si se vio la pulsación.
+                    let (signals, confidence) = if pressed {
+                        (S2_TYPE | S3_INPUT | S5_NOTICE, 0.6)
+                    } else {
+                        (S2_TYPE | S5_NOTICE, 0.4)
+                    };
+                    let counted = crate::update(&app, |tracker, now| {
+                        tracker.chest_opened(now, kind, confidence, signals)
+                    });
+                    match counted {
+                        Ok(_) => diag.detected(name, pressed),
+                        Err(error) => diag.log(&format!("no se pudo guardar el cofre: {error}")),
+                    }
+                    save(&roi, format!("{now}-{name}.png"));
                 }
-                save(&roi, format!("{now}-{}.png", kind.as_str()));
             } else if reading == Reading::Unknown
                 && previous != Reading::Unknown
                 && unknown_samples < MAX_UNKNOWN_SAMPLES

@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
+  import { texts, type Lang } from "$lib/i18n";
 
   type Counts = { normal: number; rare: number; spirit: number; ammo: number; total: number };
   type Stats = {
@@ -18,8 +19,8 @@
   type Diag = {
     supported: boolean;
     dir: string;
-    eDown: boolean;
-    ePresses: number;
+    inputDown: boolean;
+    inputPresses: number;
     pollHits: number;
     hotkeyHits: number;
     hotkeyError: string | null;
@@ -28,16 +29,34 @@
     frames: number;
     lastResult: { ok: boolean; message: string } | null;
     detected: number;
+    detectedWithInput: number;
     lastDetected: string | null;
     detectError: string | null;
   };
 
+  type Binding =
+    | { device: "key"; code: number; label: string }
+    | { device: "mouse"; button: number }
+    | { device: "pad"; button: number };
+  type Settings = { language: string; binding: Binding; requireInput: boolean };
+
   let stats = $state<Stats | null>(null);
   let diag = $state<Diag | null>(null);
+  let settings = $state<Settings | null>(null);
   let thumbnail = $state("");
   let debug = $state(false);
   let error = $state("");
   let now = $state(Date.now());
+
+  // Idioma de la interfaz: el guardado o, la primera vez, el del sistema.
+  const lang = $derived<Lang>(
+    settings?.language === "en" || settings?.language === "es"
+      ? settings.language
+      : navigator.language.toLowerCase().startsWith("es")
+        ? "es"
+        : "en",
+  );
+  const t = $derived(texts[lang]);
 
   async function run(command: string, args?: Record<string, unknown>) {
     try {
@@ -48,10 +67,27 @@
     }
   }
 
+  async function save(changes: Partial<Settings>) {
+    if (!settings) return;
+    settings = { ...settings, ...changes };
+    try {
+      await invoke("set_settings", { settings });
+      error = "";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   onMount(() => {
     run("get_stats");
     invoke<boolean>("is_debug").then((value) => (debug = value));
     invoke<Diag>("get_diag").then((value) => (diag = value));
+    invoke<Settings>("get_settings").then((value) => {
+      settings = value;
+      // La primera vez se guarda el idioma del sistema, para que el backend
+      // genere sus mensajes en el mismo idioma que la interfaz.
+      if (!value.language) save({ language: lang });
+    });
     const listeners = [
       listen<Stats>("stats-changed", (event) => (stats = event.payload)),
       listen<Diag>("diag-state", (event) => (diag = event.payload)),
@@ -64,15 +100,8 @@
     };
   });
 
-  const kindNames: Record<string, string> = {
-    normal: "cofre de tesoro",
-    rare: "cofre raro",
-    spirit: "cofre de espíritus",
-    ammo: "caja de munición",
-  };
-
   function breakdown(c: Counts) {
-    return `Tesoro ${c.normal} · Raro ${c.rare} · Espíritu ${c.spirit} · Munición ${c.ammo}`;
+    return `${t.treasure} ${c.normal} · ${t.rare} ${c.rare} · ${t.spirit} ${c.spirit} · ${t.ammo} ${c.ammo}`;
   }
 
   function elapsed(since: number | null) {
@@ -96,113 +125,182 @@
     if (!error) adjustAmount = null;
   }
 
-  const simulated = [
-    ["match_start", "Inicia partida"],
-    ["normal", "+ Tesoro"],
-    ["rare", "+ Raro"],
-    ["spirit", "+ Espíritu"],
-    ["ammo", "+ Munición"],
-    ["eliminated", "Eliminado"],
-    ["victory", "Victoria"],
-    ["lobby", "Lobby"],
-  ];
+  // Botón con el que el jugador abre los contenedores.
+  let capturing = $state(false);
+
+  function bindingLabel(binding: Binding) {
+    if (binding.device === "key") return `${t.key} ${binding.label}`;
+    if (binding.device === "mouse") return t.mouseButtons[binding.button] ?? `${t.mouse} ${binding.button}`;
+    return `${t.pad}: ${t.padButtons[binding.button] ?? binding.button}`;
+  }
+
+  function startCapture() {
+    // Con un pequeño retardo, para no capturar el propio clic en el botón.
+    setTimeout(() => (capturing = true), 200);
+  }
+
+  function captureKey(event: KeyboardEvent) {
+    if (!capturing) return;
+    event.preventDefault();
+    capturing = false;
+    const label = event.key.length === 1 ? event.key.toUpperCase() : event.code || event.key;
+    save({ binding: { device: "key", code: event.keyCode, label } });
+  }
+
+  function captureMouse(event: MouseEvent) {
+    if (!capturing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    capturing = false;
+    save({ binding: { device: "mouse", button: event.button } });
+  }
+
+  const simulated = ["match_start", "normal", "rare", "spirit", "ammo", "eliminated", "victory", "lobby"];
 </script>
+
+<svelte:window
+  onkeydown={captureKey}
+  onmousedowncapture={captureMouse}
+  oncontextmenu={(event) => event.preventDefault()}
+/>
 
 <main>
   {#if stats}
     <header class:activo={stats.inMatch}>
-      ● {stats.inMatch ? "EN PARTIDA" : stats.sessionActive ? "SESIÓN ACTIVA" : "SIN SESIÓN"}
+      ● {stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
     </header>
 
     <section>
-      <div class="fila"><span>PARTIDA</span><strong>{stats.matchCounts.total}</strong></div>
+      <div class="fila"><span>{t.match}</span><strong>{stats.matchCounts.total}</strong></div>
       <small>{breakdown(stats.matchCounts)}</small>
     </section>
 
     <section>
       <div class="fila">
-        <span>HOY <small>{elapsed(stats.sessionStartedAt)}</small></span>
+        <span>{t.today} <small>{elapsed(stats.sessionStartedAt)}</small></span>
         <strong>{stats.sessionCounts.total}</strong>
       </div>
       <small>{breakdown(stats.sessionCounts)}</small>
-      <small class="linea">Partidas: {stats.sessionMatches}</small>
+      <small class="linea">{t.matches}: {stats.sessionMatches}</small>
     </section>
 
     <section>
-      <div class="fila"><span>HISTÓRICO</span><strong>{stats.totalCounts.total}</strong></div>
+      <div class="fila"><span>{t.allTime}</span><strong>{stats.totalCounts.total}</strong></div>
       <small>{breakdown(stats.totalCounts)}</small>
-      <small class="linea">Partidas: {stats.totalMatches}</small>
+      <small class="linea">{t.matches}: {stats.totalMatches}</small>
     </section>
 
     <nav>
-      <button onclick={() => run("start_session")} disabled={stats.sessionActive}>Iniciar</button>
-      <button onclick={() => run("stop_session")} disabled={!stats.sessionActive}>Detener</button>
-      <button onclick={() => run("new_match")}>Nueva partida</button>
+      <button onclick={() => run("start_session")} disabled={stats.sessionActive}>{t.start}</button>
+      <button onclick={() => run("stop_session")} disabled={!stats.sessionActive}>{t.stop}</button>
+      <button onclick={() => run("new_match")}>{t.newMatch}</button>
     </nav>
 
     <form onsubmit={(e) => (e.preventDefault(), adjust())}>
-      <label for="ajuste">Ajustar histórico</label>
+      <label for="ajuste">{t.adjust}</label>
       <select bind:value={adjustType}>
-        <option value="normal">Cofres de tesoro</option>
-        <option value="rare">Cofres raros</option>
-        <option value="spirit">Cofres de espíritus</option>
-        <option value="ammo">Cajas de munición</option>
-        <option value="matches">Partidas</option>
+        <option value="normal">{t.kinds.normal}</option>
+        <option value="rare">{t.kinds.rare}</option>
+        <option value="spirit">{t.kinds.spirit}</option>
+        <option value="ammo">{t.kinds.ammo}</option>
+        <option value="matches">{t.matches}</option>
       </select>
-      <input id="ajuste" type="number" step="1" placeholder="±cantidad" bind:value={adjustAmount} />
-      <button type="submit" disabled={!adjustAmount}>Aplicar</button>
+      <input id="ajuste" type="number" step="1" placeholder={t.amount} bind:value={adjustAmount} />
+      <button type="submit" disabled={!adjustAmount}>{t.apply}</button>
     </form>
+
+    {#if settings}
+      <section>
+        <div class="fila"><span>{t.settings}</span></div>
+        <label class="ajuste">
+          {t.language}
+          <select value={lang} onchange={(e) => save({ language: e.currentTarget.value })}>
+            <option value="es">Español</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <div class="ajuste">
+          {t.openWith}: <b>{capturing ? t.pressNow : bindingLabel(settings.binding)}</b>
+        </div>
+        <nav>
+          <button onclick={startCapture} disabled={capturing}>{t.changeKey}</button>
+          <select
+            value={settings.binding.device === "pad" ? String(settings.binding.button) : ""}
+            onchange={(e) => {
+              const button = e.currentTarget.value;
+              if (button !== "") save({ binding: { device: "pad", button: Number(button) } });
+            }}
+          >
+            <option value="">{t.padChoose}</option>
+            {#each t.padButtons as name, button}
+              <option value={String(button)}>{name}</option>
+            {/each}
+          </select>
+        </nav>
+        <label class="ajuste">
+          <input
+            type="checkbox"
+            checked={settings.requireInput}
+            onchange={(e) => save({ requireInput: e.currentTarget.checked })}
+          />
+          {t.requireInput}
+        </label>
+      </section>
+    {/if}
 
     {#if diag}
       <section>
-        <div class="fila"><span>DETECCIÓN</span></div>
+        <div class="fila"><span>{t.detection}</span></div>
         {#if diag.detectError}
-          <small class="linea error">Detenida: {diag.detectError}</small>
+          <small class="linea error">{t.stopped}: {diag.detectError}</small>
         {:else}
           <small class="linea">
-            Activa · contados desde que abriste la app: {diag.detected}
-            {#if diag.lastDetected}· último: {kindNames[diag.lastDetected] ?? diag.lastDetected}{/if}
+            {t.active} · {t.countedSinceOpen}: {diag.detected}
+            {#if diag.lastDetected}
+              · {t.last}: {t.kindNames[diag.lastDetected] ?? diag.lastDetected}
+            {/if}
           </small>
+          <small class="linea">{t.withInput}: {diag.detectedWithInput} / {diag.detected}</small>
         {/if}
       </section>
 
       <section>
-        <div class="fila"><span>DIAGNÓSTICO</span></div>
+        <div class="fila"><span>{t.diagnostics}</span></div>
         {#if !diag.supported}
-          <small class="linea error">La captura y el teclado solo funcionan en Windows.</small>
+          <small class="linea error">{t.windowsOnly}</small>
         {/if}
         <small class="linea">
-          Tecla E: <b>{diag.eDown ? "PULSADA" : "suelta"}</b> · pulsaciones vistas: {diag.ePresses}
+          {t.openButton}: <b>{diag.inputDown ? t.pressed : t.released}</b> · {t.pressesSeen}: {diag.inputPresses}
         </small>
         <small class="linea">
-          F8/F9 leyendo el teclado: {diag.pollHits} · como atajo global: {diag.hotkeyHits}
+          {t.hotkeysPolled}: {diag.pollHits} · {t.hotkeysGlobal}: {diag.hotkeyHits}
         </small>
         {#if diag.hotkeyError}
-          <small class="linea error">Atajo global no disponible: {diag.hotkeyError}</small>
+          <small class="linea error">{t.hotkeyUnavailable}: {diag.hotkeyError}</small>
         {/if}
         <nav>
-          <button onclick={() => invoke("diag_shot")}>Captura en 5 s (F8)</button>
+          <button onclick={() => invoke("diag_shot")}>{t.shotIn5}</button>
           <button onclick={() => invoke("diag_burst")}>
-            {diag.recording ? "Detener ráfaga (F9)" : "Ráfaga en 5 s (F9)"}
+            {diag.recording ? t.stopBurst : t.burstIn5}
           </button>
           <button onclick={() => invoke("open_captures_dir").catch((e) => (error = String(e)))}>
-            Abrir carpeta
+            {t.openFolder}
           </button>
         </nav>
-        {#if diag.pendingIn}<small class="linea">Empieza en {diag.pendingIn} s…</small>{/if}
-        {#if diag.recording}<small class="linea">Grabando: {diag.frames} frames</small>{/if}
+        {#if diag.pendingIn}<small class="linea">{t.startsIn(diag.pendingIn)}</small>{/if}
+        {#if diag.recording}<small class="linea">{t.recording(diag.frames)}</small>{/if}
         {#if diag.lastResult}
           <small class="linea" class:error={!diag.lastResult.ok}>{diag.lastResult.message}</small>
         {/if}
-        {#if thumbnail}<img src={thumbnail} alt="Última captura" />{/if}
+        {#if thumbnail}<img src={thumbnail} alt={t.lastCapture} />{/if}
         <small class="linea">{diag.dir}</small>
       </section>
     {/if}
 
     {#if debug}
       <nav class="debug">
-        {#each simulated as [event, label]}
-          <button onclick={() => run("debug_simulate", { event })}>{label}</button>
+        {#each simulated as event}
+          <button onclick={() => run("debug_simulate", { event })}>{event}</button>
         {/each}
       </nav>
     {/if}
@@ -270,6 +368,18 @@
     max-width: 100%;
     margin: 6px 0;
     border: 1px solid #3a4050;
+  }
+
+  .ajuste {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0;
+    font-size: 13px;
+  }
+
+  .ajuste input {
+    width: auto;
   }
 
   nav {

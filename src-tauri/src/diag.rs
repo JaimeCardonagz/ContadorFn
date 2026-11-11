@@ -1,14 +1,15 @@
 //! Diagnóstico: comprueba en el equipo real qué puede ver y oír la app
-//! (captura de pantalla, tecla E, atajos F8/F9) y guarda capturas tal como las
+//! (captura de pantalla, botón de abrir, atajos F8/F9) y guarda capturas tal como las
 //! recibe, para usarlas después como casos de prueba del detector.
 //!
 //! - F8: una captura sin pérdida (PNG).
 //! - F9: empieza/detiene una ráfaga de frames (JPEG) con un CSV que anota en
-//!   cada frame si la tecla E estaba pulsada.
+//!   cada frame si el botón de abrir estaba pulsado.
 
 use crate::capture::{self, Frame};
-use crate::input::{self, Key};
+use crate::input::{self, VK_F8, VK_F9};
 use crate::now_ms;
+use crate::settings::{Binding, Settings, tr};
 use base64::Engine;
 use image::ExtendedColorType;
 use image::codecs::jpeg::JpegEncoder;
@@ -16,7 +17,7 @@ use serde::Serialize;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering::SeqCst};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -43,8 +44,9 @@ pub struct DiagState {
     /// La captura y el teclado solo están implementados en Windows.
     pub supported: bool,
     pub dir: String,
-    pub e_down: bool,
-    pub e_presses: u32,
+    /// El botón configurado para abrir está pulsado ahora.
+    pub input_down: bool,
+    pub input_presses: u32,
     /// F8/F9 vistas consultando el teclado.
     pub poll_hits: u32,
     /// F8/F9 recibidas como atajo global del sistema.
@@ -57,6 +59,8 @@ pub struct DiagState {
     pub last_result: Option<Outcome>,
     /// Contenedores contados por la detección desde que se abrió la app.
     pub detected: u32,
+    /// De esos, cuántos venían precedidos de una pulsación del botón de abrir.
+    pub detected_with_input: u32,
     /// Tipo del último contado ("normal", "rare", "spirit", "ammo").
     pub last_detected: Option<String>,
     /// Por qué la detección no está funcionando, si es el caso.
@@ -71,10 +75,14 @@ pub struct Diag {
     burst_at: AtomicI64,
     last_shot_request: AtomicI64,
     last_burst_request: AtomicI64,
+    binding: Mutex<Binding>,
+    require_input: AtomicBool,
+    /// Última pulsación del botón de abrir (epoch ms); 0 = ninguna.
+    last_press: AtomicI64,
 }
 
 impl Diag {
-    pub fn new(dir: PathBuf) -> Arc<Self> {
+    pub fn new(dir: PathBuf, settings: &Settings) -> Arc<Self> {
         let state = DiagState {
             supported: cfg!(windows),
             dir: dir.display().to_string(),
@@ -87,7 +95,27 @@ impl Diag {
             burst_at: AtomicI64::new(0),
             last_shot_request: AtomicI64::new(0),
             last_burst_request: AtomicI64::new(0),
+            binding: Mutex::new(settings.binding.clone()),
+            require_input: AtomicBool::new(settings.require_input),
+            last_press: AtomicI64::new(0),
         })
+    }
+
+    /// Aplica los ajustes que afectan a la escucha de entrada.
+    pub fn apply(&self, settings: &Settings) {
+        *self.binding.lock().unwrap_or_else(|e| e.into_inner()) = settings.binding.clone();
+        self.require_input.store(settings.require_input, SeqCst);
+    }
+
+    /// ¿Hay que exigir la pulsación del botón para contar?
+    pub fn require_input(&self) -> bool {
+        self.require_input.load(SeqCst)
+    }
+
+    /// ¿Se pulsó el botón de abrir en los últimos `within_ms` milisegundos?
+    pub fn pressed_within(&self, within_ms: i64) -> bool {
+        let last = self.last_press.load(SeqCst);
+        last != 0 && now_ms() - last <= within_ms
     }
 
     pub fn dir(&self) -> &Path {
@@ -142,11 +170,16 @@ impl Diag {
         }
     }
 
-    /// La detección contó un contenedor de tipo `kind`.
-    pub fn detected(&self, kind: &str) {
-        self.log(&format!("detectado: {kind}"));
+    /// La detección contó un contenedor de tipo `kind`; `pressed` dice si se
+    /// había visto pulsar el botón de abrir justo antes.
+    pub fn detected(&self, kind: &str, pressed: bool) {
+        self.log(&format!(
+            "detectado: {kind} (botón de abrir visto: {})",
+            if pressed { "sí" } else { "no" }
+        ));
         let mut state = self.lock();
         state.detected += 1;
+        state.detected_with_input += u32::from(pressed);
         state.last_detected = Some(kind.to_string());
     }
 
@@ -190,11 +223,23 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
 
         loop {
             let tick = Instant::now();
-            let keys = [Key::E, Key::F8, Key::F9].map(input::key_down);
+            let binding = diag
+                .binding
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let keys = [
+                input::binding_down(&binding),
+                input::vk_down(VK_F8),
+                input::vk_down(VK_F9),
+            ];
+            if keys[0] && !previous[0] {
+                diag.last_press.store(now_ms(), SeqCst);
+            }
             {
                 let mut state = diag.lock();
-                state.e_down = keys[0];
-                state.e_presses += u32::from(keys[0] && !previous[0]);
+                state.input_down = keys[0];
+                state.input_presses += u32::from(keys[0] && !previous[0]);
                 state.poll_hits += u32::from(keys[1] && !previous[1]);
                 state.poll_hits += u32::from(keys[2] && !previous[2]);
             }
@@ -221,7 +266,10 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                         Ok(started) => burst = Some(started),
                         Err(e) => diag.finish(Outcome {
                             ok: false,
-                            message: format!("No se pudo crear la carpeta de la ráfaga: {e}"),
+                            message: tr(
+                                format!("No se pudo crear la carpeta de la ráfaga: {e}"),
+                                format!("Could not create the burst folder: {e}"),
+                            ),
                         }),
                     },
                 }
@@ -238,7 +286,11 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                     if let Some(error) = failed {
                         outcome = Outcome {
                             ok: false,
-                            message: format!("Ráfaga interrumpida: {error} ({})", outcome.message),
+                            message: format!(
+                                "{}: {error} ({})",
+                                tr("Ráfaga interrumpida", "Burst interrupted"),
+                                outcome.message
+                            ),
                         };
                     }
                     diag.finish(outcome);
@@ -287,19 +339,33 @@ fn shoot(dir: &Path) -> (Outcome, Option<String>) {
     let saved = save_png(&frame, &dir.join(&name));
     let thumbnail = thumbnail_data_url(&frame);
 
-    let size = format!("{}x{} en {ms} ms", frame.width, frame.height);
+    let size = format!(
+        "{}x{} {} {ms} ms",
+        frame.width,
+        frame.height,
+        tr("en", "in")
+    );
     let outcome = match saved {
         Err(e) => Outcome {
             ok: false,
-            message: format!("Captura {size}, pero no se pudo guardar: {e}"),
+            message: tr(
+                format!("Captura {size}, pero no se pudo guardar: {e}"),
+                format!("Captured {size}, but it could not be saved: {e}"),
+            ),
         },
         Ok(()) if luma < BLACK_LUMA => Outcome {
             ok: false,
-            message: format!("Captura NEGRA ({size}, brillo {luma:.1}): {name}"),
+            message: tr(
+                format!("Captura NEGRA ({size}, brillo {luma:.1}): {name}"),
+                format!("BLACK capture ({size}, brightness {luma:.1}): {name}"),
+            ),
         },
         Ok(()) => Outcome {
             ok: true,
-            message: format!("Captura correcta ({size}, brillo {luma:.0}): {name}"),
+            message: tr(
+                format!("Captura correcta ({size}, brillo {luma:.0}): {name}"),
+                format!("Capture OK ({size}, brightness {luma:.0}): {name}"),
+            ),
         },
     };
     (outcome, thumbnail)
@@ -318,7 +384,7 @@ impl Burst {
         let dir = root.join(format!("rafaga-{}", now_ms()));
         fs::create_dir_all(&dir)?;
         let mut csv = BufWriter::new(File::create(dir.join("frames.csv"))?);
-        writeln!(csv, "frame,ms,e_pulsada")?;
+        writeln!(csv, "frame,ms,boton_pulsado")?;
         Ok(Self {
             dir,
             started: Instant::now(),
@@ -328,11 +394,11 @@ impl Burst {
     }
 
     /// Guarda un frame capturado `ms` milisegundos después de empezar.
-    fn add(&mut self, frame: &Frame, ms: u128, e_down: bool) -> Result<(), String> {
+    fn add(&mut self, frame: &Frame, ms: u128, input_down: bool) -> Result<(), String> {
         let number = self.frames + 1;
         save_jpeg(frame, &self.dir.join(format!("{number:04}.jpg")), 92)
             .map_err(|e| e.to_string())?;
-        writeln!(self.csv, "{number},{ms},{}", u8::from(e_down)).map_err(|e| e.to_string())?;
+        writeln!(self.csv, "{number},{ms},{}", u8::from(input_down)).map_err(|e| e.to_string())?;
         self.frames = number;
         Ok(())
     }
@@ -341,12 +407,18 @@ impl Burst {
         let _ = self.csv.flush();
         let secs = self.started.elapsed().as_secs_f32();
         let folder = self.dir.file_name().unwrap_or_default().to_string_lossy();
+        let fps = self.frames as f32 / secs.max(0.001);
         Outcome {
             ok: self.frames > 0,
-            message: format!(
-                "Ráfaga de {} frames en {secs:.1} s ({:.0} fps): {folder}",
-                self.frames,
-                self.frames as f32 / secs.max(0.001),
+            message: tr(
+                format!(
+                    "Ráfaga de {} frames en {secs:.1} s ({fps:.0} fps): {folder}",
+                    self.frames
+                ),
+                format!(
+                    "Burst of {} frames in {secs:.1} s ({fps:.0} fps): {folder}",
+                    self.frames
+                ),
             ),
         }
     }
@@ -465,7 +537,7 @@ mod tests {
         assert!(outcome.message.contains("3 frames"), "{}", outcome.message);
         assert_eq!(
             fs::read_to_string(dir.join("frames.csv")).unwrap(),
-            "frame,ms,e_pulsada\n1,0,0\n2,66,1\n3,133,1\n"
+            "frame,ms,boton_pulsado\n1,0,0\n2,66,1\n3,133,1\n"
         );
         for name in ["0001.jpg", "0002.jpg", "0003.jpg"] {
             let read = image::open(dir.join(name)).unwrap();

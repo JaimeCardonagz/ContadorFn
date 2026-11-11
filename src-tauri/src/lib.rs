@@ -1,11 +1,12 @@
-// El detector aún no está conectado a ninguna fuente de señales (captura,
-// audio, entrada), así que por ahora solo lo usan sus pruebas.
 mod capture;
+// La máquina de estados completa aún no se usa: falta leer de la pantalla el
+// recuadro "BUSCAR" y el anillo. De momento cuenta `watch` con solo el aviso.
 #[allow(dead_code)]
 mod detect;
 mod diag;
 mod input;
 mod notice;
+mod settings;
 mod store;
 mod tracker;
 mod watch;
@@ -14,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use diag::{Diag, DiagState};
+use settings::{Settings, tr};
 use store::{ChestType, EndReason, Store};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
@@ -74,7 +76,11 @@ fn adjust_total(app: AppHandle, chest: ChestType, delta: i64) -> Result<Stats, S
     if accepted {
         Ok(stats)
     } else {
-        Err("El ajuste dejaría ese contador por debajo de cero.".into())
+        Err(tr(
+            "El ajuste dejaría ese contador por debajo de cero.",
+            "That adjustment would take the counter below zero.",
+        )
+        .into())
     }
 }
 
@@ -89,7 +95,11 @@ fn adjust_matches(app: AppHandle, delta: i64) -> Result<Stats, String> {
     if accepted {
         Ok(stats)
     } else {
-        Err("El ajuste dejaría las partidas por debajo de cero.".into())
+        Err(tr(
+            "El ajuste dejaría las partidas por debajo de cero.",
+            "That adjustment would take the match count below zero.",
+        )
+        .into())
     }
 }
 
@@ -117,6 +127,27 @@ fn debug_simulate(app: AppHandle, event: String) -> Result<Stats, String> {
         "lobby" => update(&app, |t, now| t.match_ended(now, EndReason::Lobby)),
         other => Err(format!("evento desconocido: {other}")),
     }
+}
+
+#[tauri::command]
+fn get_settings(state: State<AppState>) -> Result<Settings, String> {
+    let tracker = state.0.lock().map_err(|e| e.to_string())?;
+    tracker.settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_settings(
+    state: State<AppState>,
+    diag: State<Arc<Diag>>,
+    settings: Settings,
+) -> Result<(), String> {
+    let mut tracker = state.0.lock().map_err(|e| e.to_string())?;
+    tracker
+        .save_settings(&settings)
+        .map_err(|e| e.to_string())?;
+    settings::set_language(&settings.language);
+    diag.apply(&settings);
+    Ok(())
 }
 
 /// Retardo de las acciones pedidas con un botón, para dar tiempo a volver al juego.
@@ -181,6 +212,8 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let store = Store::open(&dir.join("chests.db"))?;
             let tracker = Tracker::new(store, now_ms(), DEFAULT_INACTIVITY_MS)?;
+            let settings = tracker.settings()?;
+            settings::set_language(&settings.language);
             app.manage(AppState(Mutex::new(tracker)));
 
             // Diagnóstico: capturas en Imágenes/FortniteChestCounter.
@@ -190,7 +223,7 @@ pub fn run() {
                 .unwrap_or(dir)
                 .join("FortniteChestCounter");
             std::fs::create_dir_all(&captures)?;
-            let diag = Diag::new(captures);
+            let diag = Diag::new(captures, &settings);
             app.manage(diag.clone());
             if let Err(error) = register_hotkeys(app.handle(), &diag) {
                 diag.set_hotkey_error(error);
@@ -225,6 +258,8 @@ pub fn run() {
             adjust_matches,
             is_debug,
             debug_simulate,
+            get_settings,
+            set_settings,
             get_diag,
             diag_shot,
             diag_burst,

@@ -267,6 +267,24 @@ impl Store {
         Ok(counts)
     }
 
+    pub fn meta(&self, key: &str) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        self.conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+                r.get(0)
+            })
+            .optional()
+    }
+
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
     pub fn matches_in_session(&self, session_id: i64) -> Result<u32> {
         self.conn.query_row(
             "SELECT COUNT(*) FROM matches WHERE session_id = ?1",
