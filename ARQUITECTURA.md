@@ -17,7 +17,7 @@ Aplicación de escritorio **ligera, portable y de código abierto** que cuenta a
 | Plataformas del SO | **v1: Windows 10 (1903+) y Windows 11.** Fase posterior: Linux (X11 y Wayland) |
 | Fuentes de juego | v1: Fortnite nativo, GeForce Now y Xbox Cloud Gaming (navegador), todo en Windows. Fase posterior: GeForce Now en Linux |
 | Modos de juego | Battle Royale y Cero Construcción |
-| Resoluciones | 16:9 (1080p, 1440p, 4K) y 16:10 |
+| Resoluciones | 16:9 (**1366×768**, 1080p, 1440p, 4K) y 16:10. 1366×768 es la del equipo de pruebas y la primera que debe funcionar |
 | Variaciones de HUD | Escala de HUD personalizada, idioma del juego distinto al español |
 | Categorías | Normal, Raro (azul), Espíritu (morado/rosado), Jefe/Bóveda. Cajas de munición y demás: **ignoradas** |
 | Precisión | Objetivo: **exactitud total** (sin falsos positivos); verificación multiseñal |
@@ -352,7 +352,7 @@ ContadorFn/
 ### Flujo de desarrollo y pruebas (v1)
 
 - **Programación**: toda en el equipo Linux (Zorin OS). El código específico de Windows (captura DXGI, WASAPI, Raw Input, OCR, overlay) **no se puede ejecutar aquí**.
-- **Equipo de pruebas**: PC aparte con **Windows 10 22H2**. Solo recibe el `.exe` portable; no tiene entorno de desarrollo.
+- **Equipo de pruebas**: PC aparte con **Windows 10 22H2**. Solo recibe el `.exe` portable; no tiene entorno de desarrollo. Configuración de referencia: **GeForce Now**, pantalla **1366×768 (16:9)**, juego en **español de Latinoamérica**, **teclado** con `E` para interactuar. Es el caso más exigente previsto: resolución baja más compresión de vídeo del streaming.
 - **Compilación del `.exe`**: desde Linux por compilación cruzada o con GitHub Actions (runner de Windows). En la fase 0 se valida cuál de las dos resulta más práctica.
 - **Ciclo de prueba**: cada cambio en código de Windows exige compilar, copiar el `.exe` y probar en el otro equipo. Para acortarlo:
   - el detector se desarrolla y se prueba en Linux con capturas grabadas en el PC de Windows (`ImageFolderSource`, §14);
