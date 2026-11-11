@@ -95,6 +95,11 @@ CREATE TABLE IF NOT EXISTS adjustments (
   chest_type  TEXT,
   delta       INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS match_adjustments (
+  id          INTEGER PRIMARY KEY,
+  ts          INTEGER NOT NULL,
+  delta       INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '1');
 ";
@@ -254,6 +259,37 @@ impl Store {
             counts.total += n;
         }
         Ok(counts)
+    }
+
+    pub fn matches_in_session(&self, session_id: i64) -> Result<u32> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM matches WHERE session_id = ?1",
+            params![session_id],
+            |r| r.get(0),
+        )
+    }
+
+    /// Partidas jugadas en total: las registradas más los ajustes manuales.
+    pub fn total_matches(&self) -> Result<i64> {
+        self.conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM matches)
+                  + (SELECT COALESCE(SUM(delta), 0) FROM match_adjustments)",
+            [],
+            |r| r.get(0),
+        )
+    }
+
+    /// Ajuste manual del total de partidas. Devuelve `false`, sin guardar
+    /// nada, si lo dejaría por debajo de cero.
+    pub fn adjust_matches(&self, now: i64, delta: i64) -> Result<bool> {
+        if self.total_matches()? + delta < 0 {
+            return Ok(false);
+        }
+        self.conn.execute(
+            "INSERT INTO match_adjustments (ts, delta) VALUES (?1, ?2)",
+            params![now, delta],
+        )?;
+        Ok(true)
     }
 
     /// Ajuste manual del histórico (p. ej. cofres abiertos antes de instalar

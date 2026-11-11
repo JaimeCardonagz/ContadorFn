@@ -209,11 +209,26 @@ CREATE INDEX idx_events_session ON chest_events(session_id);
 CREATE INDEX idx_events_match   ON chest_events(match_id);
 CREATE INDEX idx_events_ts      ON chest_events(ts);
 
+CREATE TABLE adjustments (                -- ajustes manuales del histórico
+  id          INTEGER PRIMARY KEY,
+  ts          INTEGER NOT NULL,
+  chest_type  TEXT,                      -- NULL = sin clasificar (solo suma al total)
+  delta       INTEGER NOT NULL           -- puede ser negativo
+);
+
+CREATE TABLE match_adjustments (          -- ajustes manuales del total de partidas
+  id          INTEGER PRIMARY KEY,
+  ts          INTEGER NOT NULL,
+  delta       INTEGER NOT NULL           -- puede ser negativo
+);
+
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- versión de esquema, etc.
 ```
 
 - Modo **WAL** y escrituras por evento (unas pocas por minuto): impacto en disco inapreciable.
 - La base (`chests.db`) se guarda en la carpeta de datos que Tauri asigna al identificador de la app (`%APPDATA%\io.github.jaimecardonagz.fortnitechestcounter\` / `~/.local/share/io.github.jaimecardonagz.fortnitechestcounter/`), no junto al ejecutable.
+- **Ajuste manual**: el histórico se puede corregir a mano (cofres abiertos antes de instalar la app, o correcciones), por tipo o sin clasificar. Se guarda como ajuste aparte, no como eventos falsos, y ningún tipo puede quedar por debajo de cero. No afecta a la partida ni a la sesión.
+- **Contador de partidas**: se muestran las partidas de la sesión activa y las de siempre. Cuenta toda partida registrada, también las forzadas a mano y las interrumpidas. El total histórico de partidas admite el mismo ajuste manual que los cofres.
 - **Cierre inesperado**: al arrancar, las partidas que quedaron abiertas se cierran como `interrupted` con la hora de su último cofre. La sesión abierta se reanuda si su última actividad está dentro del periodo de inactividad; si no, se cierra en esa última actividad.
 - `confidence` es la fracción de las señales S1..S5 presentes al contar (1.0 con las cinco; 0.8 sin S3).
 

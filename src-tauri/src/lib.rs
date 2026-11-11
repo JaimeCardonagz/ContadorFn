@@ -71,6 +71,21 @@ fn adjust_total(app: AppHandle, chest: Option<ChestType>, delta: i64) -> Result<
     }
 }
 
+/// Suma (o resta) partidas al total histórico a mano.
+#[tauri::command]
+fn adjust_matches(app: AppHandle, delta: i64) -> Result<Stats, String> {
+    let mut accepted = false;
+    let stats = update(&app, |t, now| {
+        accepted = t.adjust_matches(now, delta)?;
+        Ok(())
+    })?;
+    if accepted {
+        Ok(stats)
+    } else {
+        Err("El ajuste dejaría las partidas por debajo de cero.".into())
+    }
+}
+
 #[tauri::command]
 fn is_debug() -> bool {
     cfg!(debug_assertions)
@@ -131,6 +146,7 @@ pub fn run() {
             stop_session,
             new_match,
             adjust_total,
+            adjust_matches,
             is_debug,
             debug_simulate,
         ])

@@ -20,3 +20,6 @@ debug/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Ejecutables descargados de GitHub Actions
+artifacts/

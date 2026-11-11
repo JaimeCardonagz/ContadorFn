@@ -19,6 +19,10 @@ pub struct Stats {
     pub match_counts: Counts,
     pub session_counts: Counts,
     pub total_counts: Counts,
+    /// Partidas de la sesión activa.
+    pub session_matches: u32,
+    /// Partidas de siempre, incluidos los ajustes manuales.
+    pub total_matches: u32,
 }
 
 pub struct Tracker {
@@ -132,6 +136,12 @@ impl Tracker {
         self.store.adjust_total(now, chest, delta)
     }
 
+    /// Ajuste manual del total de partidas; no toca la sesión.
+    /// Devuelve `false` si lo dejaría en negativo.
+    pub fn adjust_matches(&mut self, now: i64, delta: i64) -> Result<bool> {
+        self.store.adjust_matches(now, delta)
+    }
+
     /// Cierra la sesión por inactividad. Devuelve `true` si cambió algo.
     pub fn tick(&mut self, now: i64) -> Result<bool> {
         let Some((id, _)) = self.session else {
@@ -158,6 +168,11 @@ impl Tracker {
             match_counts: counts(self.shown_match.map(Scope::Match))?,
             session_counts: counts(self.session.map(|(id, _)| Scope::Session(id)))?,
             total_counts: counts(Some(Scope::All))?,
+            session_matches: match self.session {
+                Some((id, _)) => self.store.matches_in_session(id)?,
+                None => 0,
+            },
+            total_matches: self.store.total_matches()?.max(0) as u32,
         })
     }
 
@@ -372,5 +387,44 @@ mod tests {
         t.adjust_total(1_000, None, 250).unwrap();
         let t = Tracker::new(t.into_store(), 2_000, HOUR).unwrap();
         assert_eq!(t.stats().unwrap().total_counts.total, 250);
+    }
+
+    #[test]
+    fn cuenta_las_partidas_de_la_sesion_y_del_historico() {
+        let mut t = tracker();
+        let s = t.stats().unwrap();
+        assert_eq!((s.session_matches, s.total_matches), (0, 0));
+
+        t.match_started(1_000).unwrap();
+        t.match_started(1_500).unwrap(); // el HUD sigue ahí: misma partida
+        t.match_ended(2_000, EndReason::Eliminated).unwrap();
+        t.match_started(3_000).unwrap();
+        t.force_new_match(4_000).unwrap();
+        let s = t.stats().unwrap();
+        assert_eq!((s.session_matches, s.total_matches), (3, 3));
+
+        // Otra sesión: su cuenta empieza de cero, el histórico sigue.
+        t.stop_session(5_000).unwrap();
+        assert_eq!(t.stats().unwrap().session_matches, 0);
+        chest(&mut t, 6_000, ChestType::Normal); // cofre sin partida detectada
+        let s = t.stats().unwrap();
+        assert_eq!((s.session_matches, s.total_matches), (1, 4));
+    }
+
+    #[test]
+    fn el_total_de_partidas_se_puede_ajustar_a_mano() {
+        let mut t = tracker();
+        t.match_started(1_000).unwrap();
+        assert!(t.adjust_matches(2_000, 57).unwrap());
+        let s = t.stats().unwrap();
+        assert_eq!((s.session_matches, s.total_matches), (1, 58));
+        assert_eq!(s.total_counts.total, 0, "no toca los cofres");
+
+        assert!(t.adjust_matches(3_000, -8).unwrap());
+        assert!(!t.adjust_matches(4_000, -51).unwrap());
+        assert_eq!(t.stats().unwrap().total_matches, 50);
+
+        let t = Tracker::new(t.into_store(), 5_000, HOUR).unwrap();
+        assert_eq!(t.stats().unwrap().total_matches, 50);
     }
 }

@@ -15,7 +15,7 @@
         "label": "main",
         "title": "Fortnite Chest Counter",
         "width": 340,
-        "height": 420,
+        "height": 480,
         "minWidth": 260,
         "minHeight": 200,
         "alwaysOnTop": true,

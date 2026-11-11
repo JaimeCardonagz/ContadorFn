@@ -11,6 +11,8 @@
     matchCounts: Counts;
     sessionCounts: Counts;
     totalCounts: Counts;
+    sessionMatches: number;
+    totalMatches: number;
   };
 
   let stats = $state<Stats | null>(null);
@@ -55,7 +57,11 @@
 
   async function adjust() {
     if (!adjustAmount || !Number.isInteger(adjustAmount)) return;
-    await run("adjust_total", { chest: adjustType || null, delta: adjustAmount });
+    if (adjustType === "matches") {
+      await run("adjust_matches", { delta: adjustAmount });
+    } else {
+      await run("adjust_total", { chest: adjustType || null, delta: adjustAmount });
+    }
     if (!error) adjustAmount = null;
   }
 
@@ -88,10 +94,13 @@
         <strong>{stats.sessionCounts.total}</strong>
       </div>
       <small>{breakdown(stats.sessionCounts)}</small>
+      <small class="linea">Partidas: {stats.sessionMatches}</small>
     </section>
 
     <section>
       <div class="fila"><span>HISTÓRICO</span><strong>{stats.totalCounts.total}</strong></div>
+      <small>{breakdown(stats.totalCounts)}</small>
+      <small class="linea">Partidas: {stats.totalMatches}</small>
     </section>
 
     <nav>
@@ -103,11 +112,12 @@
     <form onsubmit={(e) => (e.preventDefault(), adjust())}>
       <label for="ajuste">Ajustar histórico</label>
       <select bind:value={adjustType}>
-        <option value="">Sin tipo</option>
-        <option value="normal">Normal</option>
-        <option value="rare">Raro</option>
-        <option value="spirit">Espíritu</option>
-        <option value="boss">Jefe</option>
+        <option value="">Cofres sin tipo</option>
+        <option value="normal">Cofres normales</option>
+        <option value="rare">Cofres raros</option>
+        <option value="spirit">Cofres de espíritu</option>
+        <option value="boss">Cofres de jefe</option>
+        <option value="matches">Partidas</option>
       </select>
       <input id="ajuste" type="number" step="1" placeholder="±cantidad" bind:value={adjustAmount} />
       <button type="submit" disabled={!adjustAmount}>Aplicar</button>
@@ -172,6 +182,10 @@
   small {
     color: #9aa1b2;
     font-variant-numeric: tabular-nums;
+  }
+
+  .linea {
+    display: block;
   }
 
   nav {
