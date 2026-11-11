@@ -192,7 +192,7 @@ CREATE TABLE matches (
   session_id  INTEGER REFERENCES sessions(id),
   started_at  INTEGER NOT NULL,
   ended_at    INTEGER,
-  end_reason  TEXT CHECK (end_reason IN ('eliminated','victory','lobby','manual'))
+  end_reason  TEXT CHECK (end_reason IN ('eliminated','victory','lobby','manual','interrupted'))
 );
 
 CREATE TABLE chest_events (
@@ -200,7 +200,7 @@ CREATE TABLE chest_events (
   ts          INTEGER NOT NULL,
   match_id    INTEGER REFERENCES matches(id),
   session_id  INTEGER REFERENCES sessions(id),
-  chest_type  TEXT NOT NULL CHECK (chest_type IN ('normal','rare','spirit','boss')),
+  chest_type  TEXT NOT NULL,             -- 'normal','rare','spirit','boss'; sin CHECK (los tipos cambian por temporada)
   confidence  REAL NOT NULL,
   signals     INTEGER NOT NULL           -- máscara de bits de S1..S5 presentes
 );
@@ -213,7 +213,9 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- versión de esquema, e
 ```
 
 - Modo **WAL** y escrituras por evento (unas pocas por minuto): impacto en disco inapreciable.
-- La base se guarda en la carpeta de datos del usuario (`%APPDATA%\FortniteChestCounter\` / `~/.local/share/fortnite-chest-counter/`), no junto al ejecutable.
+- La base (`chests.db`) se guarda en la carpeta de datos que Tauri asigna al identificador de la app (`%APPDATA%\io.github.jaimecardonagz.fortnitechestcounter\` / `~/.local/share/io.github.jaimecardonagz.fortnitechestcounter/`), no junto al ejecutable.
+- **Cierre inesperado**: al arrancar, las partidas que quedaron abiertas se cierran como `interrupted` con la hora de su último cofre. La sesión abierta se reanuda si su última actividad está dentro del periodo de inactividad; si no, se cierra en esa última actividad.
+- `confidence` es la fracción de las señales S1..S5 presentes al contar (1.0 con las cinco; 0.8 sin S3).
 
 ## 9. Interfaz (ventana flotante)
 
@@ -364,8 +366,13 @@ ContadorFn/
 ### Decisiones de diseño abiertas (cerrar en la fase V)
 
 - **Criterio medible de precisión**: sustituir "exactitud total" por una meta comprobable (p. ej. 0 falsos positivos en N partidas grabadas y un máximo de cofres perdidos).
-- **Combinación mínima de señales** para contar, incluido qué exige S5 ("sonido Y/O cambio visual") y cómo se calcula `confidence`.
-- **Definición de "día"**: qué muestra "HOY" y cómo se agrupan los gráficos si hay varias sesiones en un mismo día o una sesión cruza la medianoche.
-- **Tipos de cofre por temporada**: el `CHECK` de `chest_type` obliga a migrar cuando cambian los tipos; valorar definirlos en el perfil.
 - **Formato de grabación para tests**: `ImageFolderSource` solo reproduce frames; S3 y S5 necesitan audio y pulsaciones con marcas de tiempo.
-- **Cierre inesperado**: qué hacer con partidas y sesiones que quedan con `ended_at` vacío.
+- **Agrupación por día en los gráficos** cuando hay varias sesiones en una misma fecha.
+
+### Decisiones ya implementadas (revisables)
+
+- **Combinación mínima de señales**: para contar se exigen S1 + S2 + S4 completo + desaparición del prompt + al menos una confirmación S5 (sonido **o** cambio visual) dentro de 1 s. S3 se exige solo si hay escucha de entrada disponible. Una confirmación anterior a que el indicador se complete no vale.
+- **"HOY"** muestra la sesión activa (una sesión que cruza la medianoche sigue siendo una); sin sesión activa muestra cero.
+- **"PARTIDA"** muestra la partida en curso o, al terminar, la última de la sesión hasta que empiece otra.
+- **Cofre sin partida detectada**: si se cuenta un cofre sin haber detectado el inicio de partida, se abre partida (y sesión) en ese momento.
+- **Tipos de cofre** y **cierre inesperado**: ver §8.
