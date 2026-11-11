@@ -3,6 +3,8 @@ name: Build Windows
 on:
   push:
     branches: [main]
+    # Los cambios que solo tocan documentación no recompilan el .exe
+    paths-ignore: ["**.md"]
   workflow_dispatch:
 
 permissions:

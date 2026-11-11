@@ -250,6 +250,10 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- versión de esquema, e
 └──────────────────────────────────┘
 ```
 
+> **Estado actual:** la ventana es un panel de trabajo sin pulir (contadores, botones y ajuste manual). Lo visual no es prioridad hasta que la detección funcione.
+>
+> **Overlay compacto (decidido el 2026-11-10, pendiente de implementar):** durante el juego solo se verá texto pequeño sobre fondo transparente, al estilo del overlay de Discord, en la **esquina que elija el usuario** y sin tapar nada. Mostrará únicamente tres datos: **número de partida**, **cofres abiertos** y **cofres de la partida actual**. El panel de arriba queda como vista de ajustes/edición.
+
 - **Siempre encima**, fondo semitransparente (opacidad configurable), tamaño compacto y redimensionable.
 - **Click-through**: los clics atraviesan la ventana durante el juego. Un atajo alterna el **modo edición** (mover/redimensionar/pulsar botones).
 - **Panel 📊**: gráficos de cofres por día, promedio por partida y distribución por tipo.
