@@ -261,7 +261,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- versión de esquema, e
 
 > **Estado actual:** la ventana es un panel de trabajo sin pulir (contadores, botones y ajuste manual). Lo visual no es prioridad hasta que la detección funcione.
 >
-> **Overlay compacto (decidido el 2026-11-10, pendiente de implementar):** durante el juego solo se verá texto pequeño sobre fondo transparente, al estilo del overlay de Discord, en la **esquina que elija el usuario** y sin tapar nada. Mostrará únicamente tres datos: **número de partida**, **cofres abiertos** y **cofres de la partida actual**. El panel de arriba queda como vista de ajustes/edición.
+> **Overlay compacto (decidido el 2026-11-10, pendiente de implementar):** durante el juego solo se verá texto pequeño sobre fondo transparente, al estilo del overlay de Discord, en la **esquina que elija el usuario** y sin tapar nada. Mostrará únicamente tres datos: **número de partida** (histórico), **cofres abiertos** (histórico) y **cofres de la partida actual**. El panel de arriba queda como vista de ajustes/edición.
 
 - **Siempre encima**, fondo semitransparente (opacidad configurable), tamaño compacto y redimensionable.
 - **Click-through**: los clics atraviesan la ventana durante el juego. Un atajo alterna el **modo edición** (mover/redimensionar/pulsar botones).
@@ -399,12 +399,20 @@ Los botones equivalentes actúan con 5 s de retardo, para dar tiempo a volver al
 
 Resuelto con el vídeo del 2026-11-11: aspecto del prompt ("BUSCAR", no "Abrir") y de su anillo de progreso, tiempos de apertura, avisos de confirmación, y pantallas de lobby y eliminación (§5).
 
+Confirmado por el usuario (2026-11-11):
+
+- El aviso **"+PE / COFRE" sale con todos los cofres, siempre**. Pasa a ser la confirmación principal (S5).
+- Los cofres dorados con calavera del vídeo son **cofres de tesoro**.
+- El cofre raro y el de espíritus se distinguen **por su aspecto y también por el texto** que aparece; el texto exacto está por grabar.
+- La **munición se cuenta aparte** y no suma al total de cofres.
+- El vídeo es del propio equipo de pruebas (pantalla 1366×768, GeForce Now); OBS lo guardó ampliado a 1080p. La **escala del HUD está por defecto**.
+- En el overlay compacto, tanto "cofres abiertos" como "número de partida" son los **históricos**.
+
 Sigue pendiente:
 
-- **Si el aviso "+PE COFRE" sale con todos los cofres y durante toda la partida**, o si depende del espíritu equipado ("Saqueacofres afortunado") o tiene un límite.
-- **Cómo distinguir los tres tipos de cofre.** Los cuatro cofres del vídeo eran del mismo tipo; faltan ejemplos de los otros dos y de una caja de munición vista de frente.
-- **Qué muestra la caja de munición**: si su recuadro también dice "BUSCAR" y qué aviso sale al abrirla.
-- **Cómo se ve todo en el equipo de pruebas** (GeForce Now a 1366×768): el vídeo es de 1080p, así que posiciones y tamaños hay que reescalarlos y comprobarlos con las capturas del diagnóstico.
+- **Texto y aspecto del cofre raro y del cofre de espíritus** (falta un clip de cada uno).
+- **Qué muestra la caja de munición** al abrirla (falta un clip).
+- **Diagnóstico en el equipo de pruebas**: todavía sin ejecutar. Dirá si la captura funciona con GeForce Now, si se ve la tecla `E` y si llegan `F8`/`F9`, y dará las posiciones reales a 1366×768.
 - Sonido de apertura (el vídeo lo incluye; sin analizar todavía).
 - Pantalla de victoria.
 
