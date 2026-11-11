@@ -154,6 +154,23 @@ La detección **no usa machine learning ni clips de entrenamiento**. Se basa en 
 [CONTAR +1 (tipo del aviso)] → pausa de 0,5 s → REPOSO
 ```
 
+### Primera versión funcional (implementada, 2026-11-11)
+
+La app ya cuenta sola, de momento **usando solo el aviso de experiencia** (S2 + S5):
+
+- Unas diez veces por segundo captura únicamente la zona del aviso (18 % × 14 % de la pantalla) y lee su última línea con plantillas ("COFRE", "COFRE RARO", "CAJA DE MUNICIÓN").
+- Cuenta un contenedor cada vez que **aparece** un aviso con un tipo conocido, no una vez por cada frame en que se ve.
+- Sobre los dos vídeos completos del usuario (163 s, 1626 lecturas) cuenta exactamente lo que se abrió —4 cofres de tesoro, 1 caja de munición, 1 cofre raro— sin ninguna detección de más.
+- Guarda en `Imágenes\FortniteChestCounter\avisos\` el recorte de cada detección y de los avisos que no reconoce, para comprobar aciertos y crear plantillas de tipos nuevos (el cofre de espíritus, sin plantilla todavía).
+
+**Limitaciones conocidas de esta versión:**
+
+- Dos contenedores **del mismo tipo** abiertos antes de que desaparezca el primer aviso (~2 s) cuentan como uno. Se resuelve al añadir el recuadro "BUSCAR" y el anillo, que distinguen cada apertura (la máquina de estados de arriba ya está escrita y probada, falta leer esas dos señales de la pantalla).
+- El juego debe ocupar **todo el monitor principal**; si no, la zona del aviso no cae donde se espera.
+- La ventana del contador **no debe tapar** la zona del aviso (centro-derecha de la pantalla).
+- Las plantillas salen de un vídeo de OBS reescalado; puede hacer falta rehacerlas con capturas reales del equipo de pruebas.
+- El fin de partida todavía no se detecta: una partida nueva se marca con el botón "Nueva partida".
+
 ### Casos que nunca suben el contador
 
 | Situación | Motivo |

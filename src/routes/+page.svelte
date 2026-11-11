@@ -27,6 +27,9 @@
     recording: boolean;
     frames: number;
     lastResult: { ok: boolean; message: string } | null;
+    detected: number;
+    lastDetected: string | null;
+    detectError: string | null;
   };
 
   let stats = $state<Stats | null>(null);
@@ -60,6 +63,13 @@
       clearInterval(timer);
     };
   });
+
+  const kindNames: Record<string, string> = {
+    normal: "cofre de tesoro",
+    rare: "cofre raro",
+    spirit: "cofre de espíritus",
+    ammo: "caja de munición",
+  };
 
   function breakdown(c: Counts) {
     return `Tesoro ${c.normal} · Raro ${c.rare} · Espíritu ${c.spirit} · Munición ${c.ammo}`;
@@ -144,6 +154,18 @@
     </form>
 
     {#if diag}
+      <section>
+        <div class="fila"><span>DETECCIÓN</span></div>
+        {#if diag.detectError}
+          <small class="linea error">Detenida: {diag.detectError}</small>
+        {:else}
+          <small class="linea">
+            Activa · contados desde que abriste la app: {diag.detected}
+            {#if diag.lastDetected}· último: {kindNames[diag.lastDetected] ?? diag.lastDetected}{/if}
+          </small>
+        {/if}
+      </section>
+
       <section>
         <div class="fila"><span>DIAGNÓSTICO</span></div>
         {#if !diag.supported}

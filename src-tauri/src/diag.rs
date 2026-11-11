@@ -55,6 +55,12 @@ pub struct DiagState {
     pub recording: bool,
     pub frames: u32,
     pub last_result: Option<Outcome>,
+    /// Contenedores contados por la detección desde que se abrió la app.
+    pub detected: u32,
+    /// Tipo del último contado ("normal", "rare", "spirit", "ammo").
+    pub last_detected: Option<String>,
+    /// Por qué la detección no está funcionando, si es el caso.
+    pub detect_error: Option<String>,
 }
 
 pub struct Diag {
@@ -130,8 +136,26 @@ impl Diag {
             .append(true)
             .open(self.dir.join("diagnostico.log"))
         {
-            let _ = writeln!(file, "{h:02}:{m:02}:{s:02} UTC  {message}");
+            // Una sola escritura por línea: la usan varios hilos a la vez.
+            let line = format!("{h:02}:{m:02}:{s:02} UTC  {message}\n");
+            let _ = file.write_all(line.as_bytes());
         }
+    }
+
+    /// La detección contó un contenedor de tipo `kind`.
+    pub fn detected(&self, kind: &str) {
+        self.log(&format!("detectado: {kind}"));
+        let mut state = self.lock();
+        state.detected += 1;
+        state.last_detected = Some(kind.to_string());
+    }
+
+    /// Estado de la detección: `Some(motivo)` si no puede capturar.
+    pub fn detection_error(&self, error: Option<String>) {
+        if let Some(error) = &error {
+            self.log(&format!("detección detenida: {error}"));
+        }
+        self.lock().detect_error = error;
     }
 
     fn finish(&self, outcome: Outcome) {

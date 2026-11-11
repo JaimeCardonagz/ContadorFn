@@ -5,8 +5,10 @@ mod capture;
 mod detect;
 mod diag;
 mod input;
+mod notice;
 mod store;
 mod tracker;
+mod watch;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -26,7 +28,7 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 /// Aplica un cambio al estado, avisa a la interfaz y devuelve los contadores.
-fn update(
+pub(crate) fn update(
     app: &AppHandle,
     change: impl FnOnce(&mut Tracker, i64) -> rusqlite::Result<()>,
 ) -> Result<Stats, String> {
@@ -193,7 +195,8 @@ pub fn run() {
             if let Err(error) = register_hotkeys(app.handle(), &diag) {
                 diag.set_hotkey_error(error);
             }
-            diag::spawn(app.handle().clone(), diag);
+            diag::spawn(app.handle().clone(), diag.clone());
+            watch::spawn(app.handle().clone(), diag);
 
             // Cierre de sesión por inactividad.
             let handle = app.handle().clone();

@@ -2,7 +2,7 @@
 
 Contador de cofres para Fortnite. **No lee ni modifica el juego; solo analiza la pantalla.**
 
-> Estado: esqueleto inicial. Todavía no detecta ni cuenta nada.
+> Estado: primera versión funcional en pruebas. Cuenta cofres de tesoro, cofres raros y cajas de munición leyendo el aviso de experiencia del juego (español de Latinoamérica, 1366×768).
 > El diseño completo está en [ARQUITECTURA.md](ARQUITECTURA.md).
 
 La primera versión apunta a **Windows 10/11**. Linux llegará en una fase posterior.
