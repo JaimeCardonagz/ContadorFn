@@ -79,6 +79,8 @@ pub struct Diag {
     last_burst_request: AtomicI64,
     binding: Mutex<Binding>,
     require_input: AtomicBool,
+    show_overlay: AtomicBool,
+    count_ammo: AtomicBool,
     /// Última pulsación del botón de abrir (epoch ms); 0 = ninguna.
     last_press: AtomicI64,
 }
@@ -99,6 +101,8 @@ impl Diag {
             last_burst_request: AtomicI64::new(0),
             binding: Mutex::new(settings.binding.clone()),
             require_input: AtomicBool::new(settings.require_input),
+            show_overlay: AtomicBool::new(settings.show_overlay),
+            count_ammo: AtomicBool::new(settings.count_ammo),
             last_press: AtomicI64::new(0),
         })
     }
@@ -107,6 +111,16 @@ impl Diag {
     pub fn apply(&self, settings: &Settings) {
         *self.binding.lock().unwrap_or_else(|e| e.into_inner()) = settings.binding.clone();
         self.require_input.store(settings.require_input, SeqCst);
+        self.show_overlay.store(settings.show_overlay, SeqCst);
+        self.count_ammo.store(settings.count_ammo, SeqCst);
+    }
+
+    pub fn show_overlay(&self) -> bool {
+        self.show_overlay.load(SeqCst)
+    }
+
+    pub fn count_ammo(&self) -> bool {
+        self.count_ammo.load(SeqCst)
     }
 
     /// ¿Hay que exigir la pulsación del botón para contar?

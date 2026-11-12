@@ -186,34 +186,94 @@ fn hide_from_capture(app: &AppHandle, hide: bool) {
     }
 }
 
-/// Muestra el contador sobre el juego en la esquina elegida, o lo oculta.
-/// Los clics lo atraviesan para que no estorbe al jugar.
+/// Coloca el contador pegado a la esquina elegida. No lo muestra: eso lo
+/// decide el bucle de detección, que solo lo enseña con el juego delante.
 fn apply_overlay(app: &AppHandle, settings: &Settings) {
-    const MARGIN: f64 = 14.0;
     let Some(window) = app.get_webview_window("overlay") else {
         return;
     };
     if !settings.show_overlay {
         let _ = window.hide();
-        return;
     }
     if let (Ok(Some(monitor)), Ok(size)) = (window.primary_monitor(), window.outer_size()) {
-        let margin = (MARGIN * monitor.scale_factor()) as i32;
         let (screen, origin) = (monitor.size(), monitor.position());
-        let right = origin.x + screen.width as i32 - size.width as i32 - margin;
-        let bottom = origin.y + screen.height as i32 - size.height as i32 - margin;
+        let right = origin.x + screen.width as i32 - size.width as i32;
+        let bottom = origin.y + screen.height as i32 - size.height as i32;
         // Abajo a la izquierda no se ofrece: ahí está la barra de vida.
         let (x, y) = match settings.corner.as_str() {
-            "top-right" => (right, origin.y + margin),
+            "top-right" => (right, origin.y),
             "bottom-right" => (right, bottom),
-            _ => (origin.x + margin, origin.y + margin),
+            _ => (origin.x, origin.y),
         };
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
+}
+
+/// Muestra u oculta el contador sobre el juego. Al mostrarlo, el panel se
+/// retira a la bandeja del sistema para no estorbar.
+pub(crate) fn set_overlay_visible(app: &AppHandle, visible: bool) {
+    let Some(overlay) = app.get_webview_window("overlay") else {
+        return;
+    };
+    if !visible {
+        let _ = overlay.hide();
+        return;
+    }
     // Primero mostrarla: en Linux no se puede hacer atravesable una ventana
     // que todavía no existe en pantalla.
-    let _ = window.show();
-    let _ = window.set_ignore_cursor_events(true);
+    let _ = overlay.show();
+    let _ = overlay.set_ignore_cursor_events(true);
+    if let Some(panel) = app.get_webview_window("main") {
+        let _ = panel.hide();
+    }
+}
+
+fn show_panel(app: &AppHandle) {
+    if let Some(panel) = app.get_webview_window("main") {
+        let _ = panel.show();
+        let _ = panel.unminimize();
+        let _ = panel.set_focus();
+    }
+}
+
+/// Icono en la bandeja del sistema: clic para abrir el panel, menú para salir.
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let open = MenuItem::with_id(
+        app,
+        "open",
+        tr("Abrir panel", "Open panel"),
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(app, "quit", tr("Salir", "Quit"), true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let mut tray = TrayIconBuilder::new()
+        .tooltip("Fortnite Chest Counter")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => show_panel(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_panel(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
 }
 
 /// Retardo de las acciones pedidas con un botón, para dar tiempo a volver al juego.
@@ -295,6 +355,9 @@ pub fn run() {
             app.manage(diag.clone());
             if let Err(error) = register_hotkeys(app.handle(), &diag) {
                 diag.set_hotkey_error(error);
+            }
+            if let Err(error) = build_tray(app.handle()) {
+                diag.log(&format!("sin icono en la bandeja: {error}"));
             }
             diag::spawn(app.handle().clone(), diag.clone());
             watch::spawn(app.handle().clone(), diag);

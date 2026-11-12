@@ -14,6 +14,30 @@ pub struct Frame {
     pub rgb: Vec<u8>,
 }
 
+/// ¿Es del juego la ventana en primer plano? Se reconoce por el título
+/// (Fortnite o GeForce NOW), sin contar las ventanas de esta app.
+#[cfg(windows)]
+pub fn game_in_foreground() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+
+    let mut buffer = [0u16; 256];
+    // SAFETY: el búfer es válido y GetWindowTextW no escribe más de su tamaño.
+    let length = unsafe { GetWindowTextW(GetForegroundWindow(), &mut buffer) };
+    let title = String::from_utf16_lossy(&buffer[..length.max(0) as usize]).to_lowercase();
+    is_game_title(&title)
+}
+
+#[cfg(not(windows))]
+pub fn game_in_foreground() -> bool {
+    false
+}
+
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn is_game_title(lowercase_title: &str) -> bool {
+    (lowercase_title.contains("fortnite") || lowercase_title.contains("geforce now"))
+        && !lowercase_title.contains("chest counter")
+}
+
 /// Captura el monitor principal completo.
 pub fn grab_screen() -> Result<Frame, String> {
     let (width, height) = screen_size()?;
@@ -150,5 +174,21 @@ pub fn grab_rect(x: u32, y: u32, width: u32, height: u32) -> Result<Frame, Strin
                 .flat_map(|p| [p[2], p[1], p[0]])
                 .collect(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_game_title;
+
+    #[test]
+    fn reconoce_el_juego_por_el_titulo_pero_no_a_esta_app() {
+        assert!(is_game_title("fortnite"));
+        assert!(is_game_title("fortnite® on geforce now"));
+        assert!(is_game_title("geforce now"));
+        assert!(!is_game_title("fortnite chest counter"));
+        assert!(!is_game_title("fortnite chest counter - contador"));
+        assert!(!is_game_title("documentos"));
+        assert!(!is_game_title(""));
     }
 }

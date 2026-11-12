@@ -48,7 +48,7 @@
   }
 
   div {
-    padding: 4px 8px;
+    padding: 1px 4px;
     font-family: system-ui, "Segoe UI", sans-serif;
     font-size: 15px;
     line-height: 1.45;

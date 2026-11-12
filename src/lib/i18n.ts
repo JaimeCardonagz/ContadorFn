@@ -46,7 +46,8 @@ const es = {
   overlayMatch: "Partida",
   overlayTotal: "Cofres",
   overlayThis: "Esta partida",
-  showOverlay: "Mostrar el contador sobre el juego (si no, queda en segundo plano)",
+  showOverlay: "Mostrar el contador sobre el juego (aparece al abrir el juego y este panel se va a la bandeja)",
+  countAmmo: "Contar también las cajas de munición",
   corner: "Esquina del contador",
   corners: {
     "top-left": "Arriba a la izquierda",
@@ -166,7 +167,8 @@ const en: typeof es = {
   overlayMatch: "Match",
   overlayTotal: "Chests",
   overlayThis: "This match",
-  showOverlay: "Show the counter over the game (otherwise it runs in the background)",
+  showOverlay: "Show the counter over the game (it appears when the game is open and this panel goes to the tray)",
+  countAmmo: "Also count ammo boxes",
   corner: "Counter corner",
   corners: {
     "top-left": "Top left",

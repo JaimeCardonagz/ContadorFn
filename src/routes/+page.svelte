@@ -47,6 +47,7 @@
     showOverlay: boolean;
     corner: string;
     setupDone: boolean;
+    countAmmo: boolean;
   };
 
   let stats = $state<Stats | null>(null);
@@ -56,7 +57,7 @@
   let debug = $state(false);
   let error = $state("");
   let now = $state(Date.now());
-  let tab = $state<"counter" | "stats" | "settings" | "history" | "diag">("counter");
+  let tab = $state<"counter" | "stats" | "settings" | "diag">("counter");
 
   // Idioma de la interfaz: el guardado o, la primera vez, el del sistema.
   const lang = $derived<Lang>(
@@ -111,7 +112,8 @@
   });
 
   function breakdown(c: Counts) {
-    return `${t.treasure} ${c.normal} · ${t.rare} ${c.rare} · ${t.spirit} ${c.spirit} · ${t.ammo} ${c.ammo}`;
+    const chests = `${t.treasure} ${c.normal} · ${t.rare} ${c.rare} · ${t.spirit} ${c.spirit}`;
+    return settings?.countAmmo === false ? chests : `${chests} · ${t.ammo} ${c.ammo}`;
   }
 
   function elapsed(since: number | null) {
@@ -119,20 +121,6 @@
     const s = Math.max(0, Math.floor((now - since) / 1000));
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
-  }
-
-  // Ajuste manual del histórico: cofres abiertos antes de usar la app, o correcciones.
-  let adjustType = $state("normal");
-  let adjustAmount = $state<number | null>(null);
-
-  async function adjust() {
-    if (!adjustAmount || !Number.isInteger(adjustAmount)) return;
-    if (adjustType === "matches") {
-      await run("adjust_matches", { delta: adjustAmount });
-    } else {
-      await run("adjust_total", { chest: adjustType, delta: adjustAmount });
-    }
-    if (!error) adjustAmount = null;
   }
 
   // Primera vez: lo que el jugador ya llevaba antes de usar el programa.
@@ -209,7 +197,7 @@
     </form>
   {:else}
   <div class="tabs">
-    {#each ["counter", "stats", "settings", "history", "diag"] as const as name}
+    {#each ["counter", "stats", "settings", "diag"] as const as name}
       <button class:actual={tab === name} onclick={() => (tab = name)}>{t.tabs[name]}</button>
     {/each}
   </div>
@@ -254,7 +242,7 @@
         <tr><th></th><th>{t.total}</th><th>{t.perMatch}</th></tr>
       </thead>
       <tbody>
-        {#each ["normal", "rare", "spirit", "ammo"] as const as kind}
+        {#each (["normal", "rare", "spirit", "ammo"] as const).filter((k) => k !== "ammo" || settings?.countAmmo !== false) as kind}
           <tr>
             <td>{t.kinds[kind]}</td>
             <td>{stats.totalCounts[kind]}</td>
@@ -309,6 +297,14 @@
         />
         {t.hideFromCapture}
       </label>
+      <label class="ajuste">
+        <input
+          type="checkbox"
+          checked={settings.countAmmo}
+          onchange={(e) => save({ countAmmo: e.currentTarget.checked })}
+        />
+        {t.countAmmo}
+      </label>
     </section>
 
     <section>
@@ -339,28 +335,6 @@
         {t.requireInput}
       </label>
     </section>
-  {/if}
-
-  {#if tab === "history"}
-    <small class="linea">{t.historyHelp}</small>
-    <form onsubmit={(e) => (e.preventDefault(), adjust())}>
-      <select bind:value={adjustType}>
-        <option value="normal">{t.kinds.normal}</option>
-        <option value="rare">{t.kinds.rare}</option>
-        <option value="spirit">{t.kinds.spirit}</option>
-        <option value="ammo">{t.kinds.ammo}</option>
-        <option value="matches">{t.matches}</option>
-      </select>
-      <input type="number" step="1" placeholder={t.amount} bind:value={adjustAmount} />
-      <button type="submit" disabled={!adjustAmount}>{t.apply}</button>
-    </form>
-    {#if stats}
-      <section>
-        <div class="fila"><span>{t.allTime}</span><strong>{stats.totalCounts.total}</strong></div>
-        <small>{breakdown(stats.totalCounts)}</small>
-        <small class="linea">{t.matches}: {stats.totalMatches}</small>
-      </section>
-    {/if}
   {/if}
 
   {#if tab === "diag" && diag}

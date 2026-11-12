@@ -108,6 +108,8 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
         let mut counter = NoticeCounter::default();
         let mut matches = MatchWatcher::default();
         let mut fuses = FuseCounter::default();
+        let mut overlay_shown = false;
+        let mut hud_visible = false;
         let mut turn = 0u32;
         let mut failing = false;
         let mut previous = Reading::Nothing;
@@ -138,6 +140,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 && let Ok(zone) = grab_health_bar()
             {
                 let visible = scene::health_bar_visible(&zone);
+                hud_visible = visible;
                 diag.set_hud_visible(visible);
                 let change = match matches.step(now_ms(), visible) {
                     Some(MatchEvent::Started) => {
@@ -156,6 +159,16 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 };
                 if let Some(Err(error)) = change {
                     diag.log(&format!("no se pudo guardar el cambio de partida: {error}"));
+                }
+            }
+
+            // El contador se muestra solo con el juego delante (o con el HUD de
+            // partida a la vista, por si el título de la ventana no se reconoce).
+            if turn.is_multiple_of(5) {
+                let wanted = diag.show_overlay() && (capture::game_in_foreground() || hud_visible);
+                if wanted != overlay_shown {
+                    crate::set_overlay_visible(&app, wanted);
+                    overlay_shown = wanted;
                 }
             }
 
@@ -183,7 +196,10 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 None => "sin plantilla de ese tamaño".to_string(),
             };
             let now = now_ms();
-            if let Some(kind) = counter.step(reading.kind()) {
+            let counted_kind = counter
+                .step(reading.kind())
+                .filter(|kind| *kind != ChestType::Ammo || diag.count_ammo());
+            if let Some(kind) = counted_kind {
                 let pressed = diag.pressed_within(INPUT_WINDOW_MS);
                 let name = kind.as_str();
                 if diag.require_input() && !pressed {
