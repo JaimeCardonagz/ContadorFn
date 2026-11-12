@@ -45,7 +45,7 @@ def score(m, t):
     return max(ncc(a, b, dx, dy) for dx in range(-3, 4) for dy in range(-1, 2))
 
 if __name__ == '__main__':
-    D = 'Imagenes/FortniteChestCounter/'
+    D = 'Imagenes/FortniteChestCounter prueba 1/'
     obs = P.dump_templates()
     t, _ = P.masks(Image.open('Debug/frames/spirit_11.2.png').convert('RGB')); obs['spirit'] = P.line_mask(t, P.lines(t)[-1])
     real = {}

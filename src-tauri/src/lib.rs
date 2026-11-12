@@ -4,6 +4,7 @@ mod capture;
 #[allow(dead_code)]
 mod detect;
 mod diag;
+mod fuse;
 mod input;
 mod notice;
 mod notice_templates;

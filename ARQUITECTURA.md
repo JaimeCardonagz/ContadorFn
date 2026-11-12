@@ -182,6 +182,11 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Segunda prueba real y cañón dorado (2026-11-12)
+
+- Segunda prueba en el equipo real: 27 contenedores contados (20 de tesoro, 4 raros, 2 de munición, 1 de espíritus); el usuario confirma que los cuatro tipos contaron bien. "COFRE RARO" coincidió 0,94 con su plantilla. El inicio y el fin de partida se detectaron solos.
+- **Cañón dorado**: suelta botín como un cofre pero no muestra aviso de experiencia. Su recuadro dice "ENCENDER MECHA". Se cuenta **como cofre de tesoro** (decisión del usuario) cuando, con ese recuadro a la vista, avanza el anillo de progreso y después el recuadro desaparece (`fuse.rs`). Probado con la ráfaga real del cañón (cuenta uno) y con la del cofre (no cuenta ninguno).
+
 ### Inicio y fin de partida automáticos (implementado, 2026-11-12)
 
 La señal es la **barra de vida** (abajo a la izquierda), que se mira una vez por segundo:

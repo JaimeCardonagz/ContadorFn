@@ -181,21 +181,21 @@ fn is_outline([r, g, b]: [u8; 3]) -> bool {
 
 /// Línea de texto: filas [y0, y1) y columnas [x0, x1).
 #[derive(Debug, Clone, Copy)]
-struct Line {
-    y0: usize,
-    y1: usize,
-    x0: usize,
-    x1: usize,
+pub(crate) struct Line {
+    pub y0: usize,
+    pub y1: usize,
+    pub x0: usize,
+    pub x1: usize,
 }
 
-struct Mask {
-    w: usize,
-    h: usize,
-    bits: Vec<bool>,
+pub(crate) struct Mask {
+    pub w: usize,
+    pub h: usize,
+    pub bits: Vec<bool>,
 }
 
 impl Mask {
-    fn get(&self, x: isize, y: isize) -> bool {
+    pub fn get(&self, x: isize, y: isize) -> bool {
         x >= 0
             && y >= 0
             && (x as usize) < self.w
@@ -203,7 +203,7 @@ impl Mask {
             && self.bits[y as usize * self.w + x as usize]
     }
 
-    fn from_ascii(rows: &[&str]) -> Self {
+    pub fn from_ascii(rows: &[&str]) -> Self {
         Self {
             w: rows[0].len(),
             h: rows.len(),
@@ -239,7 +239,7 @@ impl Mask {
         }
     }
 
-    fn lines(&self) -> Vec<Line> {
+    pub fn lines(&self) -> Vec<Line> {
         let row_count = |y: usize| {
             self.bits[y * self.w..(y + 1) * self.w]
                 .iter()

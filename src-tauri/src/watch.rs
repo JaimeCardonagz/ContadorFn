@@ -8,8 +8,9 @@
 //! recuadro "BUSCAR" y el anillo (`detect.rs`), que distinguen cada apertura.
 
 use crate::capture::{self, Frame};
-use crate::detect::{S2_TYPE, S3_INPUT, S5_NOTICE};
+use crate::detect::{S1_PROMPT, S2_TYPE, S3_INPUT, S4_PROGRESS, S5_NOTICE};
 use crate::diag::Diag;
+use crate::fuse::{self, FuseCounter};
 use crate::notice::{self, Reading};
 use crate::now_ms;
 use crate::scene::{self, MatchEvent, MatchWatcher};
@@ -106,6 +107,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
 
         let mut counter = NoticeCounter::default();
         let mut matches = MatchWatcher::default();
+        let mut fuses = FuseCounter::default();
         let mut turn = 0u32;
         let mut failing = false;
         let mut previous = Reading::Nothing;
@@ -154,6 +156,24 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 };
                 if let Some(Err(error)) = change {
                     diag.log(&format!("no se pudo guardar el cambio de partida: {error}"));
+                }
+            }
+
+            // Cañón dorado: no da aviso de experiencia; cuenta como cofre de tesoro.
+            let fuse_zone = capture::screen_size().and_then(|(width, height)| {
+                let (x, y, w, h) = fuse::roi_rect(width, height);
+                capture::grab_rect(x, y, w, h)
+            });
+            if let Ok(zone) = fuse_zone
+                && fuses.step(fuse::read(&zone))
+            {
+                let pressed = diag.pressed_within(INPUT_WINDOW_MS);
+                let counted = crate::update(&app, |tracker, now| {
+                    tracker.chest_opened(now, ChestType::Normal, 0.4, S1_PROMPT | S4_PROGRESS)
+                });
+                match counted {
+                    Ok(_) => diag.detected("normal", pressed, "cañón dorado"),
+                    Err(error) => diag.log(&format!("no se pudo guardar el cañón: {error}")),
                 }
             }
 

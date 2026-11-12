@@ -13,7 +13,7 @@ import notice_proto as P
 from eval_ncc import text_of
 from PIL import Image
 
-REAL = 'Imagenes/FortniteChestCounter/avisos/'
+REAL = 'Imagenes/FortniteChestCounter prueba 1/avisos/'
 SOURCES = [
     # (tipo, descripción, imagen, ¿pantalla completa?)
     ('Normal', 'COFRE, vídeo de OBS', 'Debug/frames/normal_a_48.8.png', True),
