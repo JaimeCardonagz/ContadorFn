@@ -6,8 +6,8 @@ set -e
 extraer() {
     out="Debug/avisos-10fps/$2"
     rm -rf "$out" && mkdir -p "$out"
-    # La zona es notice::roi_rect(1366, 768) = x 846, y 207, 246x107.
-    ffmpeg -v error -i "$1" -vf "fps=10,scale=1366:768:flags=bicubic,crop=246:107:846:207" "$out/%05d.png"
+    # La zona es notice::roi_rect(1366, 768) = x 819, y 180, 273x134.
+    ffmpeg -v error -i "$1" -vf "fps=10,scale=1366:768:flags=bicubic,crop=273:134:819:180" "$out/%05d.png"
     echo "$2: $(ls "$out" | wc -l) recortes"
 }
 extraer "Debug/Cofres Prueba.mp4" cofres-prueba

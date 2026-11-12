@@ -119,7 +119,11 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 failing = false;
             }
 
-            let reading = notice::read(&roi);
+            let (reading, closest) = notice::read_scored(&roi);
+            let closest = match closest {
+                Some((kind, score)) => format!("más parecida: {} {score:.2}", kind.as_str()),
+                None => "sin plantilla de ese tamaño".to_string(),
+            };
             let now = now_ms();
             if let Some(kind) = counter.step(reading.kind()) {
                 let pressed = diag.pressed_within(INPUT_WINDOW_MS);
@@ -138,7 +142,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                         tracker.chest_opened(now, kind, confidence, signals)
                     });
                     match counted {
-                        Ok(_) => diag.detected(name, pressed),
+                        Ok(_) => diag.detected(name, pressed, &closest),
                         Err(error) => diag.log(&format!("no se pudo guardar el cofre: {error}")),
                     }
                     save(&roi, format!("{now}-{name}.png"));
@@ -149,6 +153,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 && now - unknown_saved_at >= UNKNOWN_SAMPLE_GAP_MS
             {
                 save(&roi, format!("{now}-desconocido.png"));
+                diag.log(&format!("aviso desconocido ({closest})"));
                 unknown_samples += 1;
                 unknown_saved_at = now;
             }
@@ -251,5 +256,34 @@ mod tests {
             }
             assert_eq!(counted, expected, "{name}");
         }
+    }
+
+    /// Ráfaga real grabada por la app en el equipo de pruebas: 99 capturas a
+    /// 10 fps en las que se abre un cofre de tesoro.
+    #[test]
+    fn rafaga_real_del_equipo_de_pruebas() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/reales/rafaga");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            eprintln!("sin ráfaga real: prueba omitida");
+            return;
+        };
+        let mut files: Vec<_> = entries.map(|e| e.unwrap().path()).collect();
+        files.sort();
+        let mut counter = NoticeCounter::default();
+        let (mut counted, mut frames_read) = (Vec::new(), 0);
+        for path in &files {
+            let image = image::open(path).unwrap().into_rgb8();
+            let roi = Frame {
+                width: image.width(),
+                height: image.height(),
+                rgb: image.into_raw(),
+            };
+            let kind = notice::read(&roi).kind();
+            frames_read += usize::from(kind == Some(Normal));
+            counted.extend(counter.step(kind));
+        }
+        assert_eq!(counted, [Normal]);
+        // El aviso dura unos 20 frames; se lee bien en casi todos, no solo en dos.
+        assert!(frames_read >= 16, "solo se leyó en {frames_read} frames");
     }
 }

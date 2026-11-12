@@ -168,11 +168,25 @@ Las plantillas del aviso son texto, así que cada idioma del juego necesita las 
 [CONTAR +1 (tipo del aviso)] → pausa de 0,5 s → REPOSO
 ```
 
+### Resultado de la primera prueba real (2026-11-12)
+
+Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366):
+
+- **La captura funciona**: GDI ve la imagen de GeForce Now (29 ms la pantalla completa), así que no hace falta DXGI.
+- **El botón de abrir se ve**: las 10 detecciones tenían una pulsación de `E` justo antes. La opción de exigirla ya se puede activar en ese equipo.
+- **Contó 10 de 11**: 8 cofres de tesoro, 1 caja de munición y 1 cofre de espíritus, todos correctos y ninguno de más. **Se le escapó un cofre de tesoro.**
+- **Causa del fallo**: las plantillas venían de un vídeo de OBS reescalado y el texto real solo coincidía píxel a píxel un 57–70 %, justo en el umbral. Además el aviso entra deslizándose ~0,5 s antes de quedarse quieto ~1,4 s, y en movimiento se dibuja distinto.
+- **Arreglo**: la comparación pasó de coincidencia píxel a píxel a **correlación entre máscaras difuminadas**, con varias plantillas por etiqueta (vídeo y capturas reales). Con las capturas reales, el texto correcto da ≥ 0,92 y otro texto de la misma anchura ≤ 0,81; el umbral está en 0,86. El cofre que se perdió ahora se lee, y es uno de los casos de prueba.
+- La zona de lectura se amplió hacia arriba y a la izquierda: en un aviso de cuatro líneas la cantidad quedaba cortada.
+- Otros avisos vistos y correctamente ignorados: "ESCUDOS LLENOS", "ESCUDO ROTO X2", "ELIMINACIÓN", "NUEVA FASE DE LA TORMENTA".
+
+Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
+
 ### Primera versión funcional (implementada, 2026-11-11)
 
 La app ya cuenta sola, de momento **usando solo el aviso de experiencia** (S2 + S5):
 
-- Unas diez veces por segundo captura únicamente la zona del aviso (18 % × 14 % de la pantalla) y lee su última línea con plantillas ("COFRE", "COFRE RARO", "COFRE DE ESPÍRITUS", "CAJA DE MUNICIÓN").
+- Unas diez veces por segundo captura únicamente la zona del aviso (20 % × 17,5 % de la pantalla) y lee su última línea con plantillas ("COFRE", "COFRE RARO", "COFRE DE ESPÍRITUS", "CAJA DE MUNICIÓN").
 - Cuenta un contenedor cada vez que **aparece** un aviso con un tipo conocido, no una vez por cada frame en que se ve.
 - Sobre los tres vídeos completos del usuario (178 s, 1778 lecturas) cuenta exactamente lo que se abrió —4 cofres de tesoro, 1 caja de munición, 1 cofre raro, 1 cofre de espíritus— sin ninguna detección de más.
 - Guarda en `Imágenes\FortniteChestCounter\avisos\` el recorte de cada detección y de los avisos que no reconoce, para comprobar aciertos y crear plantillas de tipos nuevos.
@@ -182,7 +196,6 @@ La app ya cuenta sola, de momento **usando solo el aviso de experiencia** (S2 + 
 - Dos contenedores **del mismo tipo** abiertos antes de que desaparezca el primer aviso (~2 s) cuentan como uno. Se resuelve al añadir el recuadro "BUSCAR" y el anillo, que distinguen cada apertura (la máquina de estados de arriba ya está escrita y probada, falta leer esas dos señales de la pantalla).
 - El juego debe ocupar **todo el monitor principal**; si no, la zona del aviso no cae donde se espera.
 - La ventana del contador **no debe tapar** la zona del aviso (centro-derecha de la pantalla).
-- Las plantillas salen de un vídeo de OBS reescalado; puede hacer falta rehacerlas con capturas reales del equipo de pruebas.
 - El fin de partida todavía no se detecta: una partida nueva se marca con el botón "Nueva partida".
 
 ### Casos que nunca suben el contador

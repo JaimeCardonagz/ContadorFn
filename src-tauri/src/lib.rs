@@ -6,6 +6,7 @@ mod detect;
 mod diag;
 mod input;
 mod notice;
+mod notice_templates;
 mod settings;
 mod store;
 mod tracker;

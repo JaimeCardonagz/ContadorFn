@@ -172,9 +172,9 @@ impl Diag {
 
     /// La detección contó un contenedor de tipo `kind`; `pressed` dice si se
     /// había visto pulsar el botón de abrir justo antes.
-    pub fn detected(&self, kind: &str, pressed: bool) {
+    pub fn detected(&self, kind: &str, pressed: bool, detail: &str) {
         self.log(&format!(
-            "detectado: {kind} (botón de abrir visto: {})",
+            "detectado: {kind} (botón de abrir visto: {}; {detail})",
             if pressed { "sí" } else { "no" }
         ));
         let mut state = self.lock();

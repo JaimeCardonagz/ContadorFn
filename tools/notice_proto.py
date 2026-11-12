@@ -7,7 +7,7 @@ Uso: python3 tools/notice_proto.py Debug/frames/*.png
 import sys
 from PIL import Image
 
-ROI = (0.62, 0.27, 0.80, 0.41)  # x0, y0, x1, y1 normalizados
+ROI = (0.60, 0.235, 0.80, 0.41)  # x0, y0, x1, y1 normalizados (igual que notice.rs)
 
 
 def is_fill(p):
