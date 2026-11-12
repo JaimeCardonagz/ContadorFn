@@ -27,7 +27,7 @@ impl Default for Binding {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     /// Idioma de la interfaz: "es", "en" o "" (aún sin elegir).
@@ -35,6 +35,20 @@ pub struct Settings {
     pub binding: Binding,
     /// Contar solo si ese botón se pulsó poco antes del aviso.
     pub require_input: bool,
+    /// Excluir la ventana de la app de capturas y grabaciones. Así la propia
+    /// app ve el juego aunque su ventana lo tape; a cambio no sale en OBS.
+    pub hide_from_capture: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            language: String::new(),
+            binding: Binding::default(),
+            require_input: false,
+            hide_from_capture: true,
+        }
+    }
 }
 
 impl Settings {
@@ -69,6 +83,7 @@ mod tests {
         let settings = Settings::from_json(None);
         assert_eq!(settings.binding, Binding::default());
         assert!(!settings.require_input);
+        assert!(settings.hide_from_capture);
         assert_eq!(Settings::from_json(Some("no es json")), settings);
     }
 
@@ -86,6 +101,7 @@ mod tests {
                 language: "en".into(),
                 binding,
                 require_input: true,
+                hide_from_capture: false,
             };
             assert_eq!(Settings::from_json(Some(&settings.to_json())), settings);
         }
@@ -102,6 +118,10 @@ mod tests {
         assert_eq!(
             (old.language.as_str(), old.binding),
             ("en", Binding::default())
+        );
+        assert!(
+            old.hide_from_capture,
+            "lo que falta toma su valor por defecto"
         );
     }
 }

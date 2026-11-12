@@ -7,6 +7,7 @@ mod diag;
 mod input;
 mod notice;
 mod notice_templates;
+mod scene;
 mod settings;
 mod store;
 mod tracker;
@@ -138,6 +139,7 @@ fn get_settings(state: State<AppState>) -> Result<Settings, String> {
 
 #[tauri::command]
 fn set_settings(
+    app: AppHandle,
     state: State<AppState>,
     diag: State<Arc<Diag>>,
     settings: Settings,
@@ -148,7 +150,16 @@ fn set_settings(
         .map_err(|e| e.to_string())?;
     settings::set_language(&settings.language);
     diag.apply(&settings);
+    hide_from_capture(&app, settings.hide_from_capture);
     Ok(())
+}
+
+/// Excluye (o no) la ventana de la app de capturas de pantalla y grabaciones,
+/// incluidas las de la propia app. En Windows 10 2004 o posterior.
+fn hide_from_capture(app: &AppHandle, hide: bool) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_content_protected(hide);
+    }
 }
 
 /// Retardo de las acciones pedidas con un botón, para dar tiempo a volver al juego.
@@ -215,6 +226,7 @@ pub fn run() {
             let tracker = Tracker::new(store, now_ms(), DEFAULT_INACTIVITY_MS)?;
             let settings = tracker.settings()?;
             settings::set_language(&settings.language);
+            hide_from_capture(app.handle(), settings.hide_from_capture);
             app.manage(AppState(Mutex::new(tracker)));
 
             // Diagnóstico: capturas en Imágenes/FortniteChestCounter.

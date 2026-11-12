@@ -65,6 +65,8 @@ pub struct DiagState {
     pub last_detected: Option<String>,
     /// Por qué la detección no está funcionando, si es el caso.
     pub detect_error: Option<String>,
+    /// Se ve el HUD de partida (la barra de vida).
+    pub hud_visible: bool,
 }
 
 pub struct Diag {
@@ -181,6 +183,10 @@ impl Diag {
         state.detected += 1;
         state.detected_with_input += u32::from(pressed);
         state.last_detected = Some(kind.to_string());
+    }
+
+    pub fn set_hud_visible(&self, visible: bool) {
+        self.lock().hud_visible = visible;
     }
 
     /// Estado de la detección: `Some(motivo)` si no puede capturar.

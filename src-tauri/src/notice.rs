@@ -166,15 +166,17 @@ fn canonical(roi: &Frame) -> Option<Vec<u8>> {
     Some(resized.into_raw())
 }
 
+/// Relleno del texto: lila muy claro (algo menos de verde que de rojo y azul).
 fn is_fill([r, g, b]: [u8; 3]) -> bool {
-    r >= 205 && b >= 220 && g >= 165 && r >= g.saturating_add(6) && b >= g.saturating_add(6)
+    // En i16: con u8 saturado, el blanco puro pasaría por lila.
+    let (r, g, b) = (r as i16, g as i16, b as i16);
+    r >= 205 && b >= 220 && g >= 165 && r - g >= 6 && b - g >= 6
 }
 
+/// Contorno del texto: violeta oscuro.
 fn is_outline([r, g, b]: [u8; 3]) -> bool {
-    b >= 95
-        && b >= r.saturating_add(22)
-        && r >= g.saturating_add(8)
-        && (r as u32 + g as u32 + b as u32) < 480
+    let (r, g, b) = (r as i16, g as i16, b as i16);
+    b >= 95 && b - r >= 22 && r - g >= 8 && r + g + b < 480
 }
 
 /// Línea de texto: filas [y0, y1) y columnas [x0, x1).

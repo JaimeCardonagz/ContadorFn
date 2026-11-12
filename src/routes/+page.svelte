@@ -32,13 +32,19 @@
     detectedWithInput: number;
     lastDetected: string | null;
     detectError: string | null;
+    hudVisible: boolean;
   };
 
   type Binding =
     | { device: "key"; code: number; label: string }
     | { device: "mouse"; button: number }
     | { device: "pad"; button: number };
-  type Settings = { language: string; binding: Binding; requireInput: boolean };
+  type Settings = {
+    language: string;
+    binding: Binding;
+    requireInput: boolean;
+    hideFromCapture: boolean;
+  };
 
   let stats = $state<Stats | null>(null);
   let diag = $state<Diag | null>(null);
@@ -245,6 +251,14 @@
           />
           {t.requireInput}
         </label>
+        <label class="ajuste">
+          <input
+            type="checkbox"
+            checked={settings.hideFromCapture}
+            onchange={(e) => save({ hideFromCapture: e.currentTarget.checked })}
+          />
+          {t.hideFromCapture}
+        </label>
       </section>
     {/if}
 
@@ -261,6 +275,7 @@
             {/if}
           </small>
           <small class="linea">{t.withInput}: {diag.detectedWithInput} / {diag.detected}</small>
+          <small class="linea">{t.matchHud}: <b>{diag.hudVisible ? t.visible : t.notVisible}</b></small>
         {/if}
       </section>
 

@@ -12,12 +12,15 @@ use crate::detect::{S2_TYPE, S3_INPUT, S5_NOTICE};
 use crate::diag::Diag;
 use crate::notice::{self, Reading};
 use crate::now_ms;
-use crate::store::ChestType;
+use crate::scene::{self, MatchEvent, MatchWatcher};
+use crate::store::{ChestType, EndReason};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 const INTERVAL: Duration = Duration::from_millis(100);
+/// Cada cuántas vueltas se mira si está el HUD de partida (una vez por segundo).
+const SCENE_EVERY: u32 = 10;
 /// Espera antes de reintentar cuando no se puede capturar.
 const RETRY: Duration = Duration::from_secs(5);
 /// Lecturas seguidas del mismo tipo para darlo por visto.
@@ -73,6 +76,12 @@ impl NoticeCounter {
     }
 }
 
+fn grab_health_bar() -> Result<Frame, String> {
+    let (_, height) = capture::screen_size()?;
+    let (x, y, w, h) = scene::bar_rect(height);
+    capture::grab_rect(x, y, w, h)
+}
+
 fn grab_notice_zone() -> Result<Frame, String> {
     let (width, height) = capture::screen_size()?;
     let (x, y, w, h) = notice::roi_rect(width, height);
@@ -96,6 +105,8 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
         };
 
         let mut counter = NoticeCounter::default();
+        let mut matches = MatchWatcher::default();
+        let mut turn = 0u32;
         let mut failing = false;
         let mut previous = Reading::Nothing;
         let mut unknown_samples = 0;
@@ -117,6 +128,33 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
             if failing {
                 diag.detection_error(None);
                 failing = false;
+            }
+
+            // Inicio y fin de partida, por la barra de vida.
+            turn = turn.wrapping_add(1);
+            if turn.is_multiple_of(SCENE_EVERY)
+                && let Ok(zone) = grab_health_bar()
+            {
+                let visible = scene::health_bar_visible(&zone);
+                diag.set_hud_visible(visible);
+                let change = match matches.step(now_ms(), visible) {
+                    Some(MatchEvent::Started) => {
+                        diag.log("partida: empieza (se ve el HUD)");
+                        Some(crate::update(&app, |tracker, now| {
+                            tracker.match_started(now)
+                        }))
+                    }
+                    Some(MatchEvent::Ended { at }) => {
+                        diag.log("partida: termina (el HUD dejó de verse)");
+                        Some(crate::update(&app, |tracker, _| {
+                            tracker.match_ended(at, EndReason::Lobby)
+                        }))
+                    }
+                    None => None,
+                };
+                if let Some(Err(error)) = change {
+                    diag.log(&format!("no se pudo guardar el cambio de partida: {error}"));
+                }
             }
 
             let (reading, closest) = notice::read_scored(&roi);

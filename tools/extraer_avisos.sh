@@ -9,6 +9,10 @@ extraer() {
     # La zona es notice::roi_rect(1366, 768) = x 819, y 180, 273x134.
     ffmpeg -v error -i "$1" -vf "fps=10,scale=1366:768:flags=bicubic,crop=273:134:819:180" "$out/%05d.png"
     echo "$2: $(ls "$out" | wc -l) recortes"
+    # Barra de vida, 1 fps: scene::bar_rect(768) = x 54, y 702, 46x18.
+    bar="Debug/barra-1fps/$2"
+    rm -rf "$bar" && mkdir -p "$bar"
+    ffmpeg -v error -i "$1" -vf "fps=1,scale=1366:768:flags=bicubic,crop=46:18:54:702" "$bar/%05d.png"
 }
 extraer "Debug/Cofres Prueba.mp4" cofres-prueba
 extraer "Debug/Cofre Raro + Caja de Municion.mp4" raro-municion

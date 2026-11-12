@@ -182,6 +182,21 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Inicio y fin de partida automáticos (implementado, 2026-11-12)
+
+La señal es la **barra de vida** (abajo a la izquierda), que se mira una vez por segundo:
+
+- **Empieza** la partida cuando la barra se ve tres veces seguidas. Ocurre ya en la isla inicial, antes del autobús, no al abrir el primer cofre.
+- **Termina** cuando la barra lleva **25 s** sin verse (eliminación, victoria o vuelta al lobby). La hora de fin que se guarda es el momento en que desapareció. Abrir el mapa o el inventario la oculta solo unos segundos y no cuenta.
+- Durante los **3 primeros minutos** el margen es de **60 s**, porque la barra se oculta mientras se va en el autobús.
+- En la pantalla de eliminación hay otra barra verde (la del rival), pero en otra posición.
+
+Comprobado con el vídeo que va del lobby a la eliminación: detecta el inicio en la isla, no se confunde con el autobús y cierra la partida en el segundo en que eliminan al jugador.
+
+Limitaciones: con menos del ~15 % de vida la parte de la barra que se mira queda vacía; si eso dura más de 25 s seguidos, la partida se cerraría antes de tiempo. Estar derribado en dúos o escuadrones no está probado.
+
+**La ventana de la app ya no estorba.** En la primera prueba real la ventana tapaba justo la barra de vida. Ahora, por defecto, la ventana se **excluye de las capturas** (`WDA_EXCLUDEFROMCAPTURE`, Windows 10 2004+): la app ve el juego aunque su ventana esté encima, en cualquier parte de la pantalla. A cambio no aparece en OBS ni en capturas; se puede desactivar en Configuración, y entonces no debe tapar ni la barra de vida ni la zona del aviso.
+
 ### Primera versión funcional (implementada, 2026-11-11)
 
 La app ya cuenta sola, de momento **usando solo el aviso de experiencia** (S2 + S5):
@@ -195,8 +210,6 @@ La app ya cuenta sola, de momento **usando solo el aviso de experiencia** (S2 + 
 
 - Dos contenedores **del mismo tipo** abiertos antes de que desaparezca el primer aviso (~2 s) cuentan como uno. Se resuelve al añadir el recuadro "BUSCAR" y el anillo, que distinguen cada apertura (la máquina de estados de arriba ya está escrita y probada, falta leer esas dos señales de la pantalla).
 - El juego debe ocupar **todo el monitor principal**; si no, la zona del aviso no cae donde se espera.
-- La ventana del contador **no debe tapar** la zona del aviso (centro-derecha de la pantalla).
-- El fin de partida todavía no se detecta: una partida nueva se marca con el botón "Nueva partida".
 
 ### Casos que nunca suben el contador
 
