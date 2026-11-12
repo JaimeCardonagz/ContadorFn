@@ -46,6 +46,7 @@
     hideFromCapture: boolean;
     showOverlay: boolean;
     corner: string;
+    setupDone: boolean;
   };
 
   let stats = $state<Stats | null>(null);
@@ -134,6 +135,23 @@
     if (!error) adjustAmount = null;
   }
 
+  // Primera vez: lo que el jugador ya llevaba antes de usar el programa.
+  let initial = $state({ normal: 0, rare: 0, spirit: 0, matches: 0 });
+
+  async function finishSetup(apply: boolean) {
+    if (apply) {
+      for (const kind of ["normal", "rare", "spirit"] as const) {
+        const delta = Math.trunc(initial[kind] || 0);
+        if (delta > 0) await run("adjust_total", { chest: kind, delta });
+        if (error) return;
+      }
+      const matches = Math.trunc(initial.matches || 0);
+      if (matches > 0) await run("adjust_matches", { delta: matches });
+      if (error) return;
+    }
+    await save({ setupDone: true });
+  }
+
   // Botón con el que el jugador abre los contenedores.
   let capturing = $state(false);
 
@@ -174,6 +192,26 @@
 />
 
 <main>
+  {#if settings && !settings.setupDone}
+    <h2>{t.setupTitle}</h2>
+    <small class="linea">{t.setupHelp}</small>
+    <form class="inicio" onsubmit={(e) => (e.preventDefault(), finishSetup(true))}>
+      {#each ["normal", "rare", "spirit"] as const as kind}
+        <label>
+          {t.setupChests(t.kinds[kind])}
+          <input type="number" min="0" step="1" bind:value={initial[kind]} />
+        </label>
+      {/each}
+      <label>
+        {t.setupMatches}
+        <input type="number" min="0" step="1" bind:value={initial.matches} />
+      </label>
+      <nav>
+        <button type="submit">{t.setupStart}</button>
+        <button type="button" onclick={() => finishSetup(false)}>{t.setupSkip}</button>
+      </nav>
+    </form>
+  {:else}
   <div class="tabs">
     {#each ["counter", "stats", "settings", "history", "diag"] as const as name}
       <button class:actual={tab === name} onclick={() => (tab = name)}>{t.tabs[name]}</button>
@@ -387,6 +425,8 @@
     {/if}
   {/if}
 
+  {/if}
+
   {#if error}<p class="error">{error}</p>{/if}
 </main>
 
@@ -461,6 +501,24 @@
 
   .ajuste input {
     width: auto;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 18px;
+  }
+
+  .inicio {
+    flex-direction: column;
+    align-items: stretch;
+    border-top: none;
+  }
+
+  .inicio label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
   }
 
   table {

@@ -183,9 +183,9 @@ fn apply_overlay(app: &AppHandle, settings: &Settings) {
         let (screen, origin) = (monitor.size(), monitor.position());
         let right = origin.x + screen.width as i32 - size.width as i32 - margin;
         let bottom = origin.y + screen.height as i32 - size.height as i32 - margin;
+        // Abajo a la izquierda no se ofrece: ahí está la barra de vida.
         let (x, y) = match settings.corner.as_str() {
             "top-right" => (right, origin.y + margin),
-            "bottom-left" => (origin.x + margin, bottom),
             "bottom-right" => (right, bottom),
             _ => (origin.x + margin, origin.y + margin),
         };

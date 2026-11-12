@@ -42,6 +42,8 @@ pub struct Settings {
     pub show_overlay: bool,
     /// Esquina del contador: "top-left", "top-right", "bottom-left" o "bottom-right".
     pub corner: String,
+    /// Ya se preguntó al usuario cuántos cofres y partidas llevaba.
+    pub setup_done: bool,
 }
 
 impl Default for Settings {
@@ -53,6 +55,7 @@ impl Default for Settings {
             hide_from_capture: true,
             show_overlay: true,
             corner: "top-left".into(),
+            setup_done: false,
         }
     }
 }
@@ -110,6 +113,7 @@ mod tests {
                 hide_from_capture: false,
                 show_overlay: false,
                 corner: "bottom-right".into(),
+                setup_done: true,
             };
             assert_eq!(Settings::from_json(Some(&settings.to_json())), settings);
         }

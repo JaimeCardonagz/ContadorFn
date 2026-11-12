@@ -187,7 +187,8 @@ Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla s
 - **Contador sobre el juego**: ventana sin bordes, transparente, siempre encima y atravesable por los clics, en la esquina que elija el usuario. Solo texto: número de partida (histórico), cofres abiertos (histórico) y cofres de esta partida.
 - **Panel**: ventana normal (ya no queda encima del juego) con pestañas: Contador, Estadísticas (total de cada tipo, partidas jugadas y promedio de cada tipo por partida), Configuración, Histórico (ajuste manual) y Diagnóstico. Cerrar el panel cierra la app.
 - En Configuración se elige si el contador **se muestra sobre el juego** o la app queda **en segundo plano** (sigue contando sin dibujar nada), y en qué esquina.
-- Si se desactiva "ocultar en capturas", el contador no debe ir abajo a la izquierda: taparía la barra de vida.
+- La esquina inferior izquierda no se ofrece para el contador: ahí está la barra de vida.
+- **Primera vez**: antes de mostrar nada, el panel pregunta cuántos cofres de tesoro, raros y de espíritus lleva abiertos el jugador (la munición no se pregunta) y cuántas partidas lleva. Eso queda como punto de partida del histórico; el promedio por partida es (lo indicado + lo contado) / (partidas indicadas + partidas contadas) y se actualiza solo.
 
 ### Segunda prueba real y cañón dorado (2026-11-12)
 
