@@ -1,7 +1,6 @@
 <script lang="ts">
   // Contador sobre el juego: solo texto, fondo transparente, tres datos.
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { invoke, listen } from "$lib/tauri";
   import { onMount } from "svelte";
   import { texts, type Lang } from "$lib/i18n";
 

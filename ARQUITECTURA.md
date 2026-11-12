@@ -191,6 +191,7 @@ Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla s
 - El contador va **pegado al borde** de la esquina elegida y solo aparece **con el juego delante** (ventana activa con "Fortnite" o "GeForce NOW" en el título, o HUD de partida a la vista); nunca al abrir el programa. Cuando aparece, el panel se retira solo a la **bandeja del sistema** (icono pequeño junto al reloj); un clic en ese icono lo vuelve a abrir.
 - Configuración permite **no contar las cajas de munición**.
 - La pestaña Histórico se eliminó: el punto de partida se fija solo en la pantalla inicial.
+- **Aspecto**: paleta "Gaming" de la skill `ui-ux-pro-max` (violeta sobre fondo muy oscuro) como variables CSS, tarjetas por bloque y un color por tipo de contenedor (dorado tesoro, azul raro, rosa espíritus, verde munición). Fuentes del sistema: no se descargan fuentes de internet. Para ver la interfaz sin Tauri, `npm run dev` la abre en el navegador con datos de ejemplo (`src/lib/tauri.ts`).
 - **Primera vez**: antes de mostrar nada, el panel pregunta cuántos cofres de tesoro, raros y de espíritus lleva abiertos el jugador (la munición no se pregunta) y cuántas partidas lleva. Eso queda como punto de partida del histórico y **borra todo lo anterior**: lo contado por el programa (cofres, munición, partidas, sesiones) y los ajustes manuales; el promedio por partida es (lo indicado + lo contado) / (partidas indicadas + partidas contadas) y se actualiza solo.
 
 ### Segunda prueba real y cañón dorado (2026-11-12)

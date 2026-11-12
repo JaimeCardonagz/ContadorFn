@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { invoke, listen } from "$lib/tauri";
   import { onMount } from "svelte";
   import { texts, type Lang } from "$lib/i18n";
 
@@ -111,11 +110,6 @@
     };
   });
 
-  function breakdown(c: Counts) {
-    const chests = `${t.treasure} ${c.normal} · ${t.rare} ${c.rare} · ${t.spirit} ${c.spirit}`;
-    return settings?.countAmmo === false ? chests : `${chests} · ${t.ammo} ${c.ammo}`;
-  }
-
   function elapsed(since: number | null) {
     if (since === null) return "";
     const s = Math.max(0, Math.floor((now - since) / 1000));
@@ -176,6 +170,17 @@
   oncontextmenu={(event) => event.preventDefault()}
 />
 
+{#snippet chips(c: Counts)}
+  <div class="chips">
+    <span class="chip tesoro">{t.treasure} <b>{c.normal}</b></span>
+    <span class="chip raro">{t.rare} <b>{c.rare}</b></span>
+    <span class="chip espiritu">{t.spirit} <b>{c.spirit}</b></span>
+    {#if settings?.countAmmo !== false}
+      <span class="chip municion">{t.ammo} <b>{c.ammo}</b></span>
+    {/if}
+  </div>
+{/snippet}
+
 <main>
   {#if settings && !settings.setupDone}
     <h2>{t.setupTitle}</h2>
@@ -204,12 +209,12 @@
 
   {#if tab === "counter" && stats}
     <header class:activo={stats.inMatch}>
-      ● {stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
+      <i></i>{stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
     </header>
 
     <section>
       <div class="fila"><span>{t.match}</span><strong>{stats.matchCounts.total}</strong></div>
-      <small>{breakdown(stats.matchCounts)}</small>
+      {@render chips(stats.matchCounts)}
     </section>
 
     <section>
@@ -217,13 +222,13 @@
         <span>{t.today} <small>{elapsed(stats.sessionStartedAt)}</small></span>
         <strong>{stats.sessionCounts.total}</strong>
       </div>
-      <small>{breakdown(stats.sessionCounts)}</small>
+      {@render chips(stats.sessionCounts)}
       <small class="linea">{t.matches}: {stats.sessionMatches}</small>
     </section>
 
     <section>
       <div class="fila"><span>{t.allTime}</span><strong>{stats.totalCounts.total}</strong></div>
-      <small>{breakdown(stats.totalCounts)}</small>
+      {@render chips(stats.totalCounts)}
       <small class="linea">{t.matches}: {stats.totalMatches}</small>
     </section>
 
@@ -401,51 +406,125 @@
 </main>
 
 <style>
+  /* Paleta "Gaming" de ui-ux-pro-max: violeta neón sobre fondo muy oscuro.
+     Los colores van como variables; los componentes no usan hex sueltos. */
+  :global(:root) {
+    --bg: #0f0f23;
+    --card: #1e1c35;
+    --muted: #27273b;
+    --border: #3b2a6b;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --primary: #7c3aed;
+    --primary-soft: #a78bfa;
+    --accent: #f43f5e;
+    --danger: #f87171;
+    --ok: #4ade80;
+    /* Un color por tipo de contenedor, parecido al del juego. */
+    --tesoro: #fbbf24;
+    --raro: #60a5fa;
+    --espiritu: #e879f9;
+    --municion: #a3e635;
+  }
+
   :global(html, body) {
     margin: 0;
-    background: #14161c;
-    color: #e8eaf0;
-    font-family: system-ui, "Segoe UI", sans-serif;
-    font-size: 14px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
     user-select: none;
   }
 
   main {
     display: flex;
     flex-direction: column;
-    padding: 10px 14px;
-    gap: 8px;
+    gap: 12px;
+    padding: 12px 14px 16px;
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    border-bottom: 1px solid var(--muted);
+  }
+
+  .tabs button {
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 6px 6px 0 0;
+    background: none;
+    color: var(--text-muted);
+    padding: 8px 9px;
+    font-size: 14px;
+  }
+
+  .tabs button:hover {
+    color: var(--text);
+    background: var(--muted);
+  }
+
+  .tabs button.actual {
+    color: var(--text);
+    border-bottom-color: var(--primary-soft);
   }
 
   header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 12px;
-    letter-spacing: 0.06em;
-    color: #9aa1b2;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+
+  header i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--text-muted);
   }
 
   header.activo {
-    color: #5fd38d;
+    color: var(--ok);
+  }
+
+  header.activo i {
+    background: var(--ok);
+    box-shadow: 0 0 8px var(--ok);
   }
 
   section {
-    border-top: 1px solid #2a2e3a;
-    padding-top: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
   }
 
   .fila {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    letter-spacing: 0.06em;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
   }
 
   strong {
-    font-size: 22px;
+    font-size: 30px;
+    line-height: 1.1;
+    letter-spacing: 0;
+    color: var(--text);
     font-variant-numeric: tabular-nums;
   }
 
   small {
-    color: #9aa1b2;
+    color: var(--text-muted);
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
   }
 
@@ -454,41 +533,142 @@
     overflow-wrap: anywhere;
   }
 
-  img {
-    display: block;
-    max-width: 100%;
-    margin: 6px 0;
-    border: 1px solid #3a4050;
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--muted);
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .chip::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .chip b {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .chip.tesoro::before {
+    background: var(--tesoro);
+  }
+
+  .chip.raro::before {
+    background: var(--raro);
+  }
+
+  .chip.espiritu::before {
+    background: var(--espiritu);
+  }
+
+  .chip.municion::before {
+    background: var(--municion);
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  section nav {
+    margin: 8px 0;
+  }
+
+  button,
+  select,
+  input {
+    min-height: 36px;
+    box-sizing: border-box;
+    background: var(--muted);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+    transition: background 150ms ease-out;
+  }
+
+  button:hover:not(:disabled) {
+    background: var(--primary);
+    border-color: var(--primary);
+  }
+
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  button:focus-visible,
+  select:focus-visible,
+  input:focus-visible {
+    outline: 2px solid var(--primary-soft);
+    outline-offset: 2px;
+  }
+
+  button[type="submit"] {
+    background: var(--primary);
+    border-color: var(--primary);
+    font-weight: 600;
+  }
+
+  input[type="checkbox"] {
+    min-height: 0;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    accent-color: var(--primary);
+    flex-shrink: 0;
+  }
+
+  input[type="number"] {
+    width: 110px;
   }
 
   .ajuste {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin: 6px 0;
-    font-size: 13px;
-  }
-
-  .ajuste input {
-    width: auto;
+    gap: 10px;
+    margin: 8px 0;
+    font-size: 14px;
   }
 
   h2 {
     margin: 0;
-    font-size: 18px;
+    font-size: 20px;
   }
 
-  .inicio {
+  form {
+    display: flex;
     flex-direction: column;
-    align-items: stretch;
-    border-top: none;
+    gap: 12px;
   }
 
   .inicio label {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
+    font-size: 14px;
   }
 
   table {
@@ -499,15 +679,16 @@
 
   th,
   td {
-    padding: 6px 4px;
+    padding: 8px 4px;
     text-align: right;
-    border-bottom: 1px solid #2a2e3a;
+    border-bottom: 1px solid var(--muted);
   }
 
   th {
     font-size: 12px;
-    font-weight: normal;
-    color: #9aa1b2;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
   }
 
   td:first-child {
@@ -515,64 +696,17 @@
   }
 
   .suma td {
-    font-weight: bold;
+    font-weight: 700;
+    border-bottom: none;
+    color: var(--primary-soft);
   }
 
-  .tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    border-bottom: 1px solid #2a2e3a;
-    padding-bottom: 8px;
-  }
-
-  .tabs button {
-    border: none;
-    background: none;
-    color: #9aa1b2;
-  }
-
-  .tabs button.actual {
-    color: #e8eaf0;
-    background: #262a36;
-  }
-
-  nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    border-top: 1px solid #2a2e3a;
-    padding-top: 8px;
-  }
-
-  form {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    border-top: 1px solid #2a2e3a;
-    padding-top: 8px;
-  }
-
-  input {
-    width: 90px;
-  }
-
-  button,
-  select,
-  input {
-    background: #262a36;
-    color: inherit;
-    border: 1px solid #3a4050;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font: inherit;
-    cursor: pointer;
-  }
-
-  button:disabled {
-    opacity: 0.4;
-    cursor: default;
+  img {
+    display: block;
+    max-width: 100%;
+    margin: 8px 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
   }
 
   .debug button {
@@ -581,7 +715,13 @@
   }
 
   .error {
-    color: #ff7b7b;
+    color: var(--danger);
     margin: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button {
+      transition: none;
+    }
   }
 </style>
