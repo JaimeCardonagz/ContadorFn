@@ -106,6 +106,25 @@ fn adjust_matches(app: AppHandle, delta: i64) -> Result<Stats, String> {
     }
 }
 
+/// Pantalla inicial: lo que el jugador llevaba antes de usar el programa.
+#[tauri::command]
+fn initial_setup(
+    app: AppHandle,
+    normal: i64,
+    rare: i64,
+    spirit: i64,
+    matches: i64,
+) -> Result<Stats, String> {
+    update(&app, |t, now| {
+        let chests = [
+            (ChestType::Normal, normal),
+            (ChestType::Rare, rare),
+            (ChestType::Spirit, spirit),
+        ];
+        t.set_totals(now, &chests, matches)
+    })
+}
+
 #[tauri::command]
 fn is_debug() -> bool {
     cfg!(debug_assertions)
@@ -313,6 +332,7 @@ pub fn run() {
             new_match,
             adjust_total,
             adjust_matches,
+            initial_setup,
             is_debug,
             debug_simulate,
             get_settings,

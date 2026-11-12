@@ -138,18 +138,15 @@
   // Primera vez: lo que el jugador ya llevaba antes de usar el programa.
   let initial = $state({ normal: 0, rare: 0, spirit: 0, matches: 0 });
 
-  async function finishSetup(apply: boolean) {
-    if (apply) {
-      for (const kind of ["normal", "rare", "spirit"] as const) {
-        const delta = Math.trunc(initial[kind] || 0);
-        if (delta > 0) await run("adjust_total", { chest: kind, delta });
-        if (error) return;
-      }
-      const matches = Math.trunc(initial.matches || 0);
-      if (matches > 0) await run("adjust_matches", { delta: matches });
-      if (error) return;
-    }
-    await save({ setupDone: true });
+  async function finishSetup() {
+    const whole = (n: number) => Math.max(0, Math.trunc(n || 0));
+    await run("initial_setup", {
+      normal: whole(initial.normal),
+      rare: whole(initial.rare),
+      spirit: whole(initial.spirit),
+      matches: whole(initial.matches),
+    });
+    if (!error) await save({ setupDone: true });
   }
 
   // Botón con el que el jugador abre los contenedores.
@@ -195,7 +192,7 @@
   {#if settings && !settings.setupDone}
     <h2>{t.setupTitle}</h2>
     <small class="linea">{t.setupHelp}</small>
-    <form class="inicio" onsubmit={(e) => (e.preventDefault(), finishSetup(true))}>
+    <form class="inicio" onsubmit={(e) => (e.preventDefault(), finishSetup())}>
       {#each ["normal", "rare", "spirit"] as const as kind}
         <label>
           {t.setupChests(t.kinds[kind])}
@@ -208,7 +205,6 @@
       </label>
       <nav>
         <button type="submit">{t.setupStart}</button>
-        <button type="button" onclick={() => finishSetup(false)}>{t.setupSkip}</button>
       </nav>
     </form>
   {:else}

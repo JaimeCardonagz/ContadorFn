@@ -285,6 +285,32 @@ impl Store {
         Ok(())
     }
 
+    /// Punto de partida del histórico: deja el total de cada tipo de cofre y
+    /// el de partidas exactamente en lo indicado, sustituyendo cualquier
+    /// ajuste manual anterior. Lo ya contado por la app queda incluido.
+    pub fn set_totals(&self, now: i64, chests: &[(ChestType, i64)], matches: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM adjustments WHERE chest_type IS NULL", [])?;
+        for (kind, total) in chests {
+            let kind = kind.as_str();
+            self.conn.execute(
+                "DELETE FROM adjustments WHERE chest_type = ?1",
+                params![kind],
+            )?;
+            self.conn.execute(
+                "INSERT INTO adjustments (ts, chest_type, delta) VALUES (?1, ?2,
+                   ?3 - (SELECT COUNT(*) FROM chest_events WHERE chest_type = ?2))",
+                params![now, kind, total.max(&0)],
+            )?;
+        }
+        self.conn.execute("DELETE FROM match_adjustments", [])?;
+        self.conn.execute(
+            "INSERT INTO match_adjustments (ts, delta) VALUES (?1, ?2 - (SELECT COUNT(*) FROM matches))",
+            params![now, matches.max(0)],
+        )?;
+        Ok(())
+    }
+
     pub fn matches_in_session(&self, session_id: i64) -> Result<u32> {
         self.conn.query_row(
             "SELECT COUNT(*) FROM matches WHERE session_id = ?1",
