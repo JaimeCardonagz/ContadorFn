@@ -121,7 +121,7 @@ fn initial_setup(
             (ChestType::Rare, rare),
             (ChestType::Spirit, spirit),
         ];
-        t.set_totals(now, &chests, matches)
+        t.reset_with_totals(now, &chests, matches)
     })
 }
 

@@ -145,14 +145,19 @@ impl Tracker {
         self.store.set_meta("settings", &settings.to_json())
     }
 
-    /// Fija el punto de partida del histórico (pantalla inicial).
-    pub fn set_totals(
+    /// Pantalla inicial: borra todo lo anterior y fija el punto de partida.
+    pub fn reset_with_totals(
         &mut self,
         now: i64,
         chests: &[(ChestType, i64)],
         matches: i64,
     ) -> Result<()> {
-        self.store.set_totals(now, chests, matches)
+        self.store.reset_with_totals(now, chests, matches)?;
+        self.session = None;
+        self.active_match = None;
+        self.shown_match = None;
+        self.last_activity = now;
+        Ok(())
     }
 
     /// Ajuste manual del total de partidas; no toca la sesión.
@@ -480,11 +485,11 @@ mod tests {
     }
 
     #[test]
-    fn el_punto_de_partida_sustituye_los_ajustes_y_luego_sigue_sumando() {
+    fn el_punto_de_partida_borra_todo_lo_anterior_y_luego_sigue_sumando() {
         let mut t = tracker();
-        // Ya había cofres contados y ajustes a mano de antes.
+        // Había de todo: cofres y munición contados, partidas y ajustes a mano.
         chest(&mut t, 1_000, ChestType::Normal);
-        chest(&mut t, 2_000, ChestType::Rare);
+        chest(&mut t, 2_000, ChestType::Ammo);
         t.adjust_total(3_000, ChestType::Normal, 500).unwrap();
         t.adjust_matches(3_000, 40).unwrap();
 
@@ -493,20 +498,27 @@ mod tests {
             (ChestType::Rare, 20),
             (ChestType::Spirit, 5),
         ];
-        t.set_totals(4_000, &start, 60).unwrap();
+        t.reset_with_totals(4_000, &start, 60).unwrap();
         let s = t.stats().unwrap();
         let c = s.total_counts;
-        assert_eq!((c.normal, c.rare, c.spirit, c.total), (300, 20, 5, 325));
+        assert_eq!(
+            (c.normal, c.rare, c.spirit, c.ammo, c.total),
+            (300, 20, 5, 0, 325)
+        );
         assert_eq!(s.total_matches, 60);
+        assert!(
+            !s.in_match && !s.session_active,
+            "la partida anterior también se borra"
+        );
+        assert_eq!((s.match_counts.total, s.session_counts.total), (0, 0));
 
-        // Repetirlo vuelve a sustituir, no acumula.
-        t.set_totals(5_000, &start, 60).unwrap();
-        assert_eq!(t.stats().unwrap().total_counts.total, 325);
-
-        // Y a partir de ahí suma lo que se va contando.
+        // A partir de ahí suma lo que se va contando.
         chest(&mut t, 6_000, ChestType::Normal);
-        t.force_new_match(7_000).unwrap();
         let s = t.stats().unwrap();
         assert_eq!((s.total_counts.normal, s.total_matches), (301, 61));
+
+        // Y sobrevive a un reinicio.
+        let t = Tracker::new(t.into_store(), 7_000, HOUR).unwrap();
+        assert_eq!(t.stats().unwrap().total_counts.total, 326);
     }
 }
