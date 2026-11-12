@@ -38,6 +38,10 @@ pub struct Settings {
     /// Excluir la ventana de la app de capturas y grabaciones. Así la propia
     /// app ve el juego aunque su ventana lo tape; a cambio no sale en OBS.
     pub hide_from_capture: bool,
+    /// Mostrar el contador sobre el juego; si no, la app queda en segundo plano.
+    pub show_overlay: bool,
+    /// Esquina del contador: "top-left", "top-right", "bottom-left" o "bottom-right".
+    pub corner: String,
 }
 
 impl Default for Settings {
@@ -47,6 +51,8 @@ impl Default for Settings {
             binding: Binding::default(),
             require_input: false,
             hide_from_capture: true,
+            show_overlay: true,
+            corner: "top-left".into(),
         }
     }
 }
@@ -102,6 +108,8 @@ mod tests {
                 binding,
                 require_input: true,
                 hide_from_capture: false,
+                show_overlay: false,
+                corner: "bottom-right".into(),
             };
             assert_eq!(Settings::from_json(Some(&settings.to_json())), settings);
         }

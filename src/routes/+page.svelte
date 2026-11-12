@@ -44,6 +44,8 @@
     binding: Binding;
     requireInput: boolean;
     hideFromCapture: boolean;
+    showOverlay: boolean;
+    corner: string;
   };
 
   let stats = $state<Stats | null>(null);
@@ -53,6 +55,7 @@
   let debug = $state(false);
   let error = $state("");
   let now = $state(Date.now());
+  let tab = $state<"counter" | "stats" | "settings" | "history" | "diag">("counter");
 
   // Idioma de la interfaz: el guardado o, la primera vez, el del sistema.
   const lang = $derived<Lang>(
@@ -171,7 +174,13 @@
 />
 
 <main>
-  {#if stats}
+  <div class="tabs">
+    {#each ["counter", "stats", "settings", "history", "diag"] as const as name}
+      <button class:actual={tab === name} onclick={() => (tab = name)}>{t.tabs[name]}</button>
+    {/each}
+  </div>
+
+  {#if tab === "counter" && stats}
     <header class:activo={stats.inMatch}>
       ● {stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
     </header>
@@ -201,9 +210,106 @@
       <button onclick={() => run("stop_session")} disabled={!stats.sessionActive}>{t.stop}</button>
       <button onclick={() => run("new_match")}>{t.newMatch}</button>
     </nav>
+  {/if}
 
+  {#if tab === "stats" && stats}
+    {@const games = stats.totalMatches}
+    {@const average = (n: number) => (games > 0 ? (n / games).toFixed(2) : "—")}
+    <table>
+      <thead>
+        <tr><th></th><th>{t.total}</th><th>{t.perMatch}</th></tr>
+      </thead>
+      <tbody>
+        {#each ["normal", "rare", "spirit", "ammo"] as const as kind}
+          <tr>
+            <td>{t.kinds[kind]}</td>
+            <td>{stats.totalCounts[kind]}</td>
+            <td>{average(stats.totalCounts[kind])}</td>
+          </tr>
+        {/each}
+        <tr class="suma">
+          <td>{t.allChests}</td>
+          <td>{stats.totalCounts.total}</td>
+          <td>{average(stats.totalCounts.total)}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="fila"><span>{t.matchesPlayed}</span><strong>{games}</strong></div>
+  {/if}
+
+  {#if tab === "settings" && settings}
+    <label class="ajuste">
+      {t.language}
+      <select value={lang} onchange={(e) => save({ language: e.currentTarget.value })}>
+        <option value="es">Español</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+
+    <section>
+      <label class="ajuste">
+        <input
+          type="checkbox"
+          checked={settings.showOverlay}
+          onchange={(e) => save({ showOverlay: e.currentTarget.checked })}
+        />
+        {t.showOverlay}
+      </label>
+      <label class="ajuste">
+        {t.corner}
+        <select
+          value={settings.corner}
+          disabled={!settings.showOverlay}
+          onchange={(e) => save({ corner: e.currentTarget.value })}
+        >
+          {#each Object.entries(t.corners) as [value, name]}
+            <option {value}>{name}</option>
+          {/each}
+        </select>
+      </label>
+      <label class="ajuste">
+        <input
+          type="checkbox"
+          checked={settings.hideFromCapture}
+          onchange={(e) => save({ hideFromCapture: e.currentTarget.checked })}
+        />
+        {t.hideFromCapture}
+      </label>
+    </section>
+
+    <section>
+      <div class="ajuste">
+        {t.openWith}: <b>{capturing ? t.pressNow : bindingLabel(settings.binding)}</b>
+      </div>
+      <nav>
+        <button onclick={startCapture} disabled={capturing}>{t.changeKey}</button>
+        <select
+          value={settings.binding.device === "pad" ? String(settings.binding.button) : ""}
+          onchange={(e) => {
+            const button = e.currentTarget.value;
+            if (button !== "") save({ binding: { device: "pad", button: Number(button) } });
+          }}
+        >
+          <option value="">{t.padChoose}</option>
+          {#each t.padButtons as name, button}
+            <option value={String(button)}>{name}</option>
+          {/each}
+        </select>
+      </nav>
+      <label class="ajuste">
+        <input
+          type="checkbox"
+          checked={settings.requireInput}
+          onchange={(e) => save({ requireInput: e.currentTarget.checked })}
+        />
+        {t.requireInput}
+      </label>
+    </section>
+  {/if}
+
+  {#if tab === "history"}
+    <small class="linea">{t.historyHelp}</small>
     <form onsubmit={(e) => (e.preventDefault(), adjust())}>
-      <label for="ajuste">{t.adjust}</label>
       <select bind:value={adjustType}>
         <option value="normal">{t.kinds.normal}</option>
         <option value="rare">{t.kinds.rare}</option>
@@ -211,106 +317,66 @@
         <option value="ammo">{t.kinds.ammo}</option>
         <option value="matches">{t.matches}</option>
       </select>
-      <input id="ajuste" type="number" step="1" placeholder={t.amount} bind:value={adjustAmount} />
+      <input type="number" step="1" placeholder={t.amount} bind:value={adjustAmount} />
       <button type="submit" disabled={!adjustAmount}>{t.apply}</button>
     </form>
-
-    {#if settings}
+    {#if stats}
       <section>
-        <div class="fila"><span>{t.settings}</span></div>
-        <label class="ajuste">
-          {t.language}
-          <select value={lang} onchange={(e) => save({ language: e.currentTarget.value })}>
-            <option value="es">Español</option>
-            <option value="en">English</option>
-          </select>
-        </label>
-        <div class="ajuste">
-          {t.openWith}: <b>{capturing ? t.pressNow : bindingLabel(settings.binding)}</b>
-        </div>
-        <nav>
-          <button onclick={startCapture} disabled={capturing}>{t.changeKey}</button>
-          <select
-            value={settings.binding.device === "pad" ? String(settings.binding.button) : ""}
-            onchange={(e) => {
-              const button = e.currentTarget.value;
-              if (button !== "") save({ binding: { device: "pad", button: Number(button) } });
-            }}
-          >
-            <option value="">{t.padChoose}</option>
-            {#each t.padButtons as name, button}
-              <option value={String(button)}>{name}</option>
-            {/each}
-          </select>
-        </nav>
-        <label class="ajuste">
-          <input
-            type="checkbox"
-            checked={settings.requireInput}
-            onchange={(e) => save({ requireInput: e.currentTarget.checked })}
-          />
-          {t.requireInput}
-        </label>
-        <label class="ajuste">
-          <input
-            type="checkbox"
-            checked={settings.hideFromCapture}
-            onchange={(e) => save({ hideFromCapture: e.currentTarget.checked })}
-          />
-          {t.hideFromCapture}
-        </label>
+        <div class="fila"><span>{t.allTime}</span><strong>{stats.totalCounts.total}</strong></div>
+        <small>{breakdown(stats.totalCounts)}</small>
+        <small class="linea">{t.matches}: {stats.totalMatches}</small>
       </section>
     {/if}
+  {/if}
 
-    {#if diag}
-      <section>
-        <div class="fila"><span>{t.detection}</span></div>
-        {#if diag.detectError}
-          <small class="linea error">{t.stopped}: {diag.detectError}</small>
-        {:else}
-          <small class="linea">
-            {t.active} · {t.countedSinceOpen}: {diag.detected}
-            {#if diag.lastDetected}
-              · {t.last}: {t.kindNames[diag.lastDetected] ?? diag.lastDetected}
-            {/if}
-          </small>
-          <small class="linea">{t.withInput}: {diag.detectedWithInput} / {diag.detected}</small>
-          <small class="linea">{t.matchHud}: <b>{diag.hudVisible ? t.visible : t.notVisible}</b></small>
-        {/if}
-      </section>
+  {#if tab === "diag" && diag}
+    <section>
+      <div class="fila"><span>{t.detection}</span></div>
+      {#if diag.detectError}
+        <small class="linea error">{t.stopped}: {diag.detectError}</small>
+      {:else}
+        <small class="linea">
+          {t.active} · {t.countedSinceOpen}: {diag.detected}
+          {#if diag.lastDetected}
+            · {t.last}: {t.kindNames[diag.lastDetected] ?? diag.lastDetected}
+          {/if}
+        </small>
+        <small class="linea">{t.withInput}: {diag.detectedWithInput} / {diag.detected}</small>
+        <small class="linea">{t.matchHud}: <b>{diag.hudVisible ? t.visible : t.notVisible}</b></small>
+      {/if}
+    </section>
 
-      <section>
-        <div class="fila"><span>{t.diagnostics}</span></div>
-        {#if !diag.supported}
-          <small class="linea error">{t.windowsOnly}</small>
-        {/if}
-        <small class="linea">
-          {t.openButton}: <b>{diag.inputDown ? t.pressed : t.released}</b> · {t.pressesSeen}: {diag.inputPresses}
-        </small>
-        <small class="linea">
-          {t.hotkeysPolled}: {diag.pollHits} · {t.hotkeysGlobal}: {diag.hotkeyHits}
-        </small>
-        {#if diag.hotkeyError}
-          <small class="linea error">{t.hotkeyUnavailable}: {diag.hotkeyError}</small>
-        {/if}
-        <nav>
-          <button onclick={() => invoke("diag_shot")}>{t.shotIn5}</button>
-          <button onclick={() => invoke("diag_burst")}>
-            {diag.recording ? t.stopBurst : t.burstIn5}
-          </button>
-          <button onclick={() => invoke("open_captures_dir").catch((e) => (error = String(e)))}>
-            {t.openFolder}
-          </button>
-        </nav>
-        {#if diag.pendingIn}<small class="linea">{t.startsIn(diag.pendingIn)}</small>{/if}
-        {#if diag.recording}<small class="linea">{t.recording(diag.frames)}</small>{/if}
-        {#if diag.lastResult}
-          <small class="linea" class:error={!diag.lastResult.ok}>{diag.lastResult.message}</small>
-        {/if}
-        {#if thumbnail}<img src={thumbnail} alt={t.lastCapture} />{/if}
-        <small class="linea">{diag.dir}</small>
-      </section>
-    {/if}
+    <section>
+      <div class="fila"><span>{t.diagnostics}</span></div>
+      {#if !diag.supported}
+        <small class="linea error">{t.windowsOnly}</small>
+      {/if}
+      <small class="linea">
+        {t.openButton}: <b>{diag.inputDown ? t.pressed : t.released}</b> · {t.pressesSeen}: {diag.inputPresses}
+      </small>
+      <small class="linea">
+        {t.hotkeysPolled}: {diag.pollHits} · {t.hotkeysGlobal}: {diag.hotkeyHits}
+      </small>
+      {#if diag.hotkeyError}
+        <small class="linea error">{t.hotkeyUnavailable}: {diag.hotkeyError}</small>
+      {/if}
+      <nav>
+        <button onclick={() => invoke("diag_shot")}>{t.shotIn5}</button>
+        <button onclick={() => invoke("diag_burst")}>
+          {diag.recording ? t.stopBurst : t.burstIn5}
+        </button>
+        <button onclick={() => invoke("open_captures_dir").catch((e) => (error = String(e)))}>
+          {t.openFolder}
+        </button>
+      </nav>
+      {#if diag.pendingIn}<small class="linea">{t.startsIn(diag.pendingIn)}</small>{/if}
+      {#if diag.recording}<small class="linea">{t.recording(diag.frames)}</small>{/if}
+      {#if diag.lastResult}
+        <small class="linea" class:error={!diag.lastResult.ok}>{diag.lastResult.message}</small>
+      {/if}
+      {#if thumbnail}<img src={thumbnail} alt={t.lastCapture} />{/if}
+      <small class="linea">{diag.dir}</small>
+    </section>
 
     {#if debug}
       <nav class="debug">
@@ -397,6 +463,52 @@
     width: auto;
   }
 
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+
+  th,
+  td {
+    padding: 6px 4px;
+    text-align: right;
+    border-bottom: 1px solid #2a2e3a;
+  }
+
+  th {
+    font-size: 12px;
+    font-weight: normal;
+    color: #9aa1b2;
+  }
+
+  td:first-child {
+    text-align: left;
+  }
+
+  .suma td {
+    font-weight: bold;
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    border-bottom: 1px solid #2a2e3a;
+    padding-bottom: 8px;
+  }
+
+  .tabs button {
+    border: none;
+    background: none;
+    color: #9aa1b2;
+  }
+
+  .tabs button.actual {
+    color: #e8eaf0;
+    background: #262a36;
+  }
+
   nav {
     display: flex;
     flex-wrap: wrap;
@@ -412,12 +524,6 @@
     gap: 6px;
     border-top: 1px solid #2a2e3a;
     padding-top: 8px;
-  }
-
-  form label {
-    flex-basis: 100%;
-    font-size: 12px;
-    color: #9aa1b2;
   }
 
   input {

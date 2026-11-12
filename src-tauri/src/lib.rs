@@ -152,15 +152,49 @@ fn set_settings(
     settings::set_language(&settings.language);
     diag.apply(&settings);
     hide_from_capture(&app, settings.hide_from_capture);
+    apply_overlay(&app, &settings);
+    let _ = app.emit("settings-changed", &settings);
     Ok(())
 }
 
-/// Excluye (o no) la ventana de la app de capturas de pantalla y grabaciones,
-/// incluidas las de la propia app. En Windows 10 2004 o posterior.
+/// Excluye (o no) las ventanas de la app de capturas de pantalla y
+/// grabaciones, incluidas las de la propia app. En Windows 10 2004 o posterior.
 fn hide_from_capture(app: &AppHandle, hide: bool) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_content_protected(hide);
+    for label in ["main", "overlay"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.set_content_protected(hide);
+        }
     }
+}
+
+/// Muestra el contador sobre el juego en la esquina elegida, o lo oculta.
+/// Los clics lo atraviesan para que no estorbe al jugar.
+fn apply_overlay(app: &AppHandle, settings: &Settings) {
+    const MARGIN: f64 = 14.0;
+    let Some(window) = app.get_webview_window("overlay") else {
+        return;
+    };
+    if !settings.show_overlay {
+        let _ = window.hide();
+        return;
+    }
+    if let (Ok(Some(monitor)), Ok(size)) = (window.primary_monitor(), window.outer_size()) {
+        let margin = (MARGIN * monitor.scale_factor()) as i32;
+        let (screen, origin) = (monitor.size(), monitor.position());
+        let right = origin.x + screen.width as i32 - size.width as i32 - margin;
+        let bottom = origin.y + screen.height as i32 - size.height as i32 - margin;
+        let (x, y) = match settings.corner.as_str() {
+            "top-right" => (right, origin.y + margin),
+            "bottom-left" => (origin.x + margin, bottom),
+            "bottom-right" => (right, bottom),
+            _ => (origin.x + margin, origin.y + margin),
+        };
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    }
+    // Primero mostrarla: en Linux no se puede hacer atravesable una ventana
+    // que todavía no existe en pantalla.
+    let _ = window.show();
+    let _ = window.set_ignore_cursor_events(true);
 }
 
 /// Retardo de las acciones pedidas con un botón, para dar tiempo a volver al juego.
@@ -228,6 +262,7 @@ pub fn run() {
             let settings = tracker.settings()?;
             settings::set_language(&settings.language);
             hide_from_capture(app.handle(), settings.hide_from_capture);
+            apply_overlay(app.handle(), &settings);
             app.manage(AppState(Mutex::new(tracker)));
 
             // Diagnóstico: capturas en Imágenes/FortniteChestCounter.
@@ -262,6 +297,14 @@ pub fn run() {
                 }
             });
             Ok(())
+        })
+        // Cerrar el panel cierra la app: el contador no puede quedarse solo.
+        .on_window_event(|window, event| {
+            if window.label() == "main"
+                && matches!(event, tauri::WindowEvent::CloseRequested { .. })
+            {
+                window.app_handle().exit(0);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_stats,

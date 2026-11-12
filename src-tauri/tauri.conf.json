@@ -17,12 +17,26 @@
       {
         "label": "main",
         "title": "Fortnite Chest Counter",
-        "width": 340,
-        "height": 700,
-        "minWidth": 260,
-        "minHeight": 200,
-        "alwaysOnTop": true,
+        "width": 440,
+        "height": 620,
+        "minWidth": 360,
+        "minHeight": 420,
         "resizable": true
+      },
+      {
+        "label": "overlay",
+        "url": "/overlay",
+        "title": "Fortnite Chest Counter - contador",
+        "width": 240,
+        "height": 84,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "focus": false,
+        "visible": false
       }
     ],
     "security": {

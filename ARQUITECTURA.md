@@ -182,6 +182,13 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Interfaz en dos ventanas (implementado, 2026-11-12)
+
+- **Contador sobre el juego**: ventana sin bordes, transparente, siempre encima y atravesable por los clics, en la esquina que elija el usuario. Solo texto: número de partida (histórico), cofres abiertos (histórico) y cofres de esta partida.
+- **Panel**: ventana normal (ya no queda encima del juego) con pestañas: Contador, Estadísticas (total de cada tipo, partidas jugadas y promedio de cada tipo por partida), Configuración, Histórico (ajuste manual) y Diagnóstico. Cerrar el panel cierra la app.
+- En Configuración se elige si el contador **se muestra sobre el juego** o la app queda **en segundo plano** (sigue contando sin dibujar nada), y en qué esquina.
+- Si se desactiva "ocultar en capturas", el contador no debe ir abajo a la izquierda: taparía la barra de vida.
+
 ### Segunda prueba real y cañón dorado (2026-11-12)
 
 - Segunda prueba en el equipo real: 27 contenedores contados (20 de tesoro, 4 raros, 2 de munición, 1 de espíritus); el usuario confirma que los cuatro tipos contaron bien. "COFRE RARO" coincidió 0,94 con su plantilla. El inicio y el fin de partida se detectaron solos.
