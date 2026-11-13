@@ -13,6 +13,9 @@
     overlayMatch: string;
     overlayTotal: boolean;
     overlayChests: string;
+    overlayColor: boolean;
+    overlaySize: string;
+    overlayOpacity: number;
   };
 
   let stats = $state<Stats | null>(null);
@@ -33,7 +36,10 @@
 </script>
 
 {#if stats && settings}
-  <OverlayText {stats} options={settings} t={texts[lang]} right={settings.corner.endsWith("right")} />
+  <!-- En las esquinas de abajo el texto se pega al borde inferior. -->
+  <main class:abajo={settings.corner.startsWith("bottom")}>
+    <OverlayText {stats} options={settings} t={texts[lang]} right={settings.corner.endsWith("right")} />
+  </main>
 {/if}
 
 <style>
@@ -42,5 +48,15 @@
     background: transparent;
     overflow: hidden;
     user-select: none;
+  }
+
+  main {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  main.abajo {
+    justify-content: flex-end;
   }
 </style>

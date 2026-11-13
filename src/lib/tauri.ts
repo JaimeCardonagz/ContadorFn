@@ -35,6 +35,9 @@ const sample: Record<string, unknown> = {
     overlayMatch: "total",
     overlayTotal: true,
     overlayChests: "types",
+    overlayColor: true,
+    overlaySize: "medium",
+    overlayOpacity: 100,
   },
   get_diag: {
     supported: true,

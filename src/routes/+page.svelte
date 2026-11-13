@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { texts, type Lang } from "$lib/i18n";
   import OverlayText from "$lib/OverlayText.svelte";
+  import Help from "$lib/Help.svelte";
 
   type Counts = { normal: number; rare: number; spirit: number; total: number };
   type Stats = {
@@ -51,6 +52,9 @@
     overlayMatch: string;
     overlayTotal: boolean;
     overlayChests: string;
+    overlayColor: boolean;
+    overlaySize: string;
+    overlayOpacity: number;
   };
 
   let stats = $state<Stats | null>(null);
@@ -269,79 +273,105 @@
   {/if}
 
   {#if tab === "settings" && settings}
-    <label class="ajuste">
-      {t.language}
-      <select value={lang} onchange={(e) => save({ language: e.currentTarget.value })}>
-        <option value="es">Español</option>
-        <option value="en">English</option>
-      </select>
-    </label>
+    <section>
+      <div class="opcion">
+        <span>{t.language}</span>
+        <select value={lang} onchange={(e) => save({ language: e.currentTarget.value })}>
+          <option value="es">Español</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+    </section>
 
     <section>
-      <label class="ajuste">
+      <div class="fila"><span>{t.overlayShows}</span></div>
+      <label class="opcion">
+        <span>{t.showOverlay}<Help text={t.help.showOverlay} /></span>
         <input
           type="checkbox"
           checked={settings.showOverlay}
           onchange={(e) => save({ showOverlay: e.currentTarget.checked })}
         />
-        {t.showOverlay}
       </label>
-      <div class="fila"><span>{t.overlayShows}</span></div>
-      <label class="ajuste">
-        {t.optMatch}
+      <div class="opcion">
+        <span>{t.corner}</span>
+        <select value={settings.corner} onchange={(e) => save({ corner: e.currentTarget.value })}>
+          {#each Object.entries(t.corners) as [value, name]}
+            <option {value}>{name}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="opcion">
+        <span>{t.optMatch}<Help text={t.help.optMatch} /></span>
         <select value={settings.overlayMatch} onchange={(e) => save({ overlayMatch: e.currentTarget.value })}>
           <option value="off">{t.optOff}</option>
           <option value="day">{t.optDay}</option>
           <option value="total">{t.optAllTime}</option>
         </select>
-      </label>
-      <label class="ajuste">
+      </div>
+      <label class="opcion">
+        <span>{t.optTotal}</span>
         <input
           type="checkbox"
           checked={settings.overlayTotal}
           onchange={(e) => save({ overlayTotal: e.currentTarget.checked })}
         />
-        {t.optTotal}
       </label>
-      <label class="ajuste">
-        {t.optChests}
+      <div class="opcion">
+        <span>{t.optChests}<Help text={t.help.optChests} /></span>
         <select value={settings.overlayChests} onchange={(e) => save({ overlayChests: e.currentTarget.value })}>
           <option value="off">{t.optOff}</option>
           <option value="sum">{t.optSum}</option>
           <option value="types">{t.optTypes}</option>
         </select>
+      </div>
+      <label class="opcion">
+        <span>{t.optColor}</span>
+        <input
+          type="checkbox"
+          checked={settings.overlayColor}
+          onchange={(e) => save({ overlayColor: e.currentTarget.checked })}
+        />
       </label>
+      <div class="opcion">
+        <span>{t.optSize}</span>
+        <select value={settings.overlaySize} onchange={(e) => save({ overlaySize: e.currentTarget.value })}>
+          {#each Object.entries(t.sizes) as [value, name]}
+            <option {value}>{name}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="opcion">
+        <span>{t.optOpacity}</span>
+        <select
+          value={String(settings.overlayOpacity)}
+          onchange={(e) => save({ overlayOpacity: Number(e.currentTarget.value) })}
+        >
+          {#each [100, 80, 60, 40] as value}
+            <option value={String(value)}>{value} %</option>
+          {/each}
+        </select>
+      </div>
       {#if stats}
         <small class="linea">{t.preview}</small>
         <div class="muestra">
           <OverlayText {stats} options={settings} {t} right={settings.corner.endsWith("right")} />
         </div>
       {/if}
-      <label class="ajuste">
-        {t.corner}
-        <select
-          value={settings.corner}
-          disabled={!settings.showOverlay}
-          onchange={(e) => save({ corner: e.currentTarget.value })}
-        >
-          {#each Object.entries(t.corners) as [value, name]}
-            <option {value}>{name}</option>
-          {/each}
-        </select>
-      </label>
-      <label class="ajuste">
+      <label class="opcion">
+        <span>{t.hideFromCapture}<Help text={t.help.hideFromCapture} /></span>
         <input
           type="checkbox"
           checked={settings.hideFromCapture}
           onchange={(e) => save({ hideFromCapture: e.currentTarget.checked })}
         />
-        {t.hideFromCapture}
       </label>
     </section>
 
     <section>
-      <div class="ajuste">
-        {t.openWith}: <b>{capturing ? t.pressNow : bindingLabel(settings.binding)}</b>
+      <div class="opcion">
+        <span>{t.openWith}<Help text={t.help.openWith} /></span>
+        <b>{capturing ? t.pressNow : bindingLabel(settings.binding)}</b>
       </div>
       <nav>
         <button onclick={startCapture} disabled={capturing}>{t.changeKey}</button>
@@ -358,36 +388,37 @@
           {/each}
         </select>
       </nav>
-      <label class="ajuste">
+      <label class="opcion">
+        <span>{t.requireInput}<Help text={t.help.requireInput} /></span>
         <input
           type="checkbox"
           checked={settings.requireInput}
           onchange={(e) => save({ requireInput: e.currentTarget.checked })}
         />
-        {t.requireInput}
       </label>
     </section>
 
     <section>
-      <div class="fila"><span>{t.resetTitle}</span></div>
-      <small class="linea">{t.resetHelp}</small>
-      <nav>
+      <div class="opcion">
+        <span>{t.resetTitle}<Help text={t.resetHelp} /></span>
         {#if confirmingReset}
-          <button
-            class="peligro"
-            onclick={() => {
-              confirmingReset = false;
-              initial = { normal: 0, rare: 0, spirit: 0, matches: 0 };
-              save({ setupDone: false });
-            }}
-          >
-            {t.resetConfirm}
-          </button>
-          <button onclick={() => (confirmingReset = false)}>{t.cancel}</button>
+          <span class="botones">
+            <button
+              class="peligro"
+              onclick={() => {
+                confirmingReset = false;
+                initial = { normal: 0, rare: 0, spirit: 0, matches: 0 };
+                save({ setupDone: false });
+              }}
+            >
+              {t.resetConfirm}
+            </button>
+            <button onclick={() => (confirmingReset = false)}>{t.cancel}</button>
+          </span>
         {:else}
           <button onclick={() => (confirmingReset = true)}>{t.resetTitle}</button>
         {/if}
-      </nav>
+      </div>
     </section>
   {/if}
 
@@ -407,13 +438,13 @@
         <small class="linea">{t.matchHud}: <b>{diag.hudVisible ? t.visible : t.notVisible}</b></small>
       {/if}
       {#if settings}
-        <label class="ajuste">
+        <label class="opcion">
+          <span>{t.saveSamples}<Help text={t.help.saveSamples} /></span>
           <input
             type="checkbox"
             checked={settings.saveSamples}
             onchange={(e) => save({ saveSamples: e.currentTarget.checked })}
           />
-          {t.saveSamples}
         </label>
       {/if}
     </section>
@@ -499,7 +530,11 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 12px 14px 16px;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 12px clamp(10px, 4vw, 20px) 20px;
   }
 
   .tabs {
@@ -718,12 +753,32 @@
     width: 110px;
   }
 
-  .ajuste {
+  /* Una opción por fila: nombre a la izquierda, control a la derecha. En
+     ventanas estrechas el control baja a la línea siguiente. */
+  .opcion {
+    position: relative;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
-    margin: 8px 0;
+    justify-content: space-between;
+    gap: 6px 12px;
+    min-height: 40px;
     font-size: 14px;
+  }
+
+  .opcion > span:first-child {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .opcion select {
+    max-width: 100%;
+  }
+
+  .botones {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   h2 {
@@ -791,6 +846,22 @@
   .error {
     color: var(--danger);
     margin: 0;
+  }
+
+  /* Ventanas muy estrechas: menos relleno y números algo más pequeños. */
+  @media (max-width: 380px) {
+    section {
+      padding: 10px;
+    }
+
+    strong {
+      font-size: 26px;
+    }
+
+    .tabs button {
+      padding: 8px 7px;
+      font-size: 13px;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -53,6 +53,12 @@ pub struct Settings {
     /// Cofres de la partida en el contador: "off", "sum" (los tres sumados) o
     /// "types" (tesoro, raro y espíritus por separado).
     pub overlay_chests: String,
+    /// Colores por tipo en el contador (si no, todo blanco).
+    pub overlay_color: bool,
+    /// Tamaño del texto del contador: "small", "medium" o "large".
+    pub overlay_size: String,
+    /// Opacidad del contador, de 40 a 100.
+    pub overlay_opacity: u8,
 }
 
 impl Default for Settings {
@@ -69,6 +75,9 @@ impl Default for Settings {
             overlay_match: "total".into(),
             overlay_total: true,
             overlay_chests: "sum".into(),
+            overlay_color: true,
+            overlay_size: "medium".into(),
+            overlay_opacity: 100,
         }
     }
 }
@@ -131,6 +140,9 @@ mod tests {
                 overlay_match: "day".into(),
                 overlay_total: false,
                 overlay_chests: "types".into(),
+                overlay_color: false,
+                overlay_size: "large".into(),
+                overlay_opacity: 60,
             };
             assert_eq!(Settings::from_json(Some(&settings.to_json())), settings);
         }

@@ -6,14 +6,27 @@
   type Counts = { normal: number; rare: number; spirit: number; total: number };
   type Props = {
     stats: { matchCounts: Counts; totalCounts: Counts; sessionMatches: number; totalMatches: number };
-    options: { overlayMatch: string; overlayTotal: boolean; overlayChests: string };
+    options: {
+      overlayMatch: string;
+      overlayTotal: boolean;
+      overlayChests: string;
+      overlayColor: boolean;
+      overlaySize: string;
+      overlayOpacity: number;
+    };
     t: (typeof texts)["es"];
     right?: boolean;
   };
   let { stats, options, t, right = false }: Props = $props();
+  const sizes: Record<string, number> = { small: 13, medium: 15, large: 19 };
 </script>
 
-<div class:right>
+<div
+  class:right
+  class:color={options.overlayColor}
+  style:font-size="{sizes[options.overlaySize] ?? 15}px"
+  style:opacity={options.overlayOpacity / 100}
+>
   {#if options.overlayMatch !== "off"}
     <p>
       {t.overlayMatch}
@@ -38,7 +51,6 @@
   div {
     padding: 1px 4px;
     font-family: "Segoe UI", system-ui, sans-serif;
-    font-size: 15px;
     line-height: 1.45;
     color: #fff;
     /* Contorno oscuro: se lee sobre cualquier fondo sin necesitar recuadro. */
@@ -59,22 +71,22 @@
   }
 
   b {
-    font-size: 17px;
+    font-size: 1.15em;
   }
 
   span + span {
     margin-left: 8px;
   }
 
-  .tesoro {
+  .color .tesoro {
     color: #fbbf24;
   }
 
-  .raro {
+  .color .raro {
     color: #7dd3fc;
   }
 
-  .espiritu {
+  .color .espiritu {
     color: #f0abfc;
   }
 </style>
