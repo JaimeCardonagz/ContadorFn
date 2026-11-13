@@ -631,6 +631,43 @@ mod tests {
         assert!(check_images(&dir, read_screen) >= 40);
     }
 
+    /// El multiplicador vale para los cuatro tipos: con "X2" detrás se sigue
+    /// reconociendo el tipo y se separa el multiplicador.
+    #[test]
+    fn el_multiplicador_se_reconoce_en_todos_los_tipos() {
+        const X2: [&str; 9] = [
+            "##...##..####.",
+            ".##.##..##..##",
+            "..###.......##",
+            "..###......##.",
+            "..###.....##..",
+            ".##.##...##...",
+            "##...##.##....",
+            "##...##.######",
+            "##...##.######",
+        ];
+        for (kind, rows) in TEMPLATES {
+            // La etiqueta, un espacio y "X2", con la misma altura.
+            let combined: Vec<String> = (0..rows.len())
+                .map(|y| {
+                    format!(
+                        "{}......{}",
+                        rows[y],
+                        X2.get(y).copied().unwrap_or("..............")
+                    )
+                })
+                .collect();
+            let combined: Vec<&str> = combined.iter().map(String::as_str).collect();
+            let read = read_scored(&notice([20, 30, 60], &combined, 30));
+            assert_eq!(read.reading, Reading::Known(*kind), "{kind:?} con X2");
+            assert!(read.suffix.is_some(), "{kind:?}: falta el multiplicador");
+
+            let alone = read_scored(&notice([20, 30, 60], rows, 30));
+            assert_eq!(alone.reading, Reading::Known(*kind));
+            assert!(alone.suffix.is_none(), "{kind:?}: multiplicador de más");
+        }
+    }
+
     /// "COFRE RARO X2" y "CAJA DE MUNICIÓN X2" reales: se reconoce el tipo y
     /// se separa el multiplicador, que es el mismo dibujo en los dos.
     #[test]
