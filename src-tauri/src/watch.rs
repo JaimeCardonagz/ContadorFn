@@ -41,6 +41,8 @@ const STACK_CONFIRM: u32 = 3;
 /// del cual son distintos; entre medias no se decide (texto en movimiento).
 const STACK_SAME: f32 = 0.8;
 const STACK_DIFFERENT: f32 = 0.7;
+/// Desplazamiento vertical mínimo para decir que la etiqueta cambió de línea.
+const ROW_JUMP: usize = 6;
 
 /// Convierte lecturas sucesivas del aviso en aperturas: una por cada aviso
 /// nuevo, y una más cada vez que aparece o cambia su multiplicador ("X2",
@@ -55,14 +57,30 @@ pub struct NoticeCounter {
     /// Multiplicador ya contado en el aviso actual.
     stack: Option<Suffix>,
     stack_candidate: Option<(Suffix, u32)>,
+    /// Fila de la etiqueta ya contada, y candidata a nueva fila.
+    row: Option<usize>,
+    row_candidate: Option<(usize, u32)>,
 }
 
 impl NoticeCounter {
-    /// Devuelve el tipo cuando hay que contar una apertura.
-    pub fn step(&mut self, kind: Option<ChestType>, suffix: Option<Suffix>) -> Option<ChestType> {
+    /// Devuelve el tipo cuando hay que contar una apertura. `row` es la fila
+    /// donde está la etiqueta leída.
+    pub fn step(
+        &mut self,
+        kind: Option<ChestType>,
+        suffix: Option<Suffix>,
+        row: Option<usize>,
+    ) -> Option<ChestType> {
         if kind.is_some() && kind == self.shown {
             self.candidate = None;
             self.missing = 0;
+            // Misma etiqueta en una línea nueva, más abajo: entre medias se
+            // abrió otra cosa (p. ej. COFRE / ELIMINACIÓN / COFRE).
+            if self.step_row(row) {
+                self.stack = None;
+                self.stack_candidate = None;
+                return kind;
+            }
             return if self.step_stack(suffix) { kind } else { None };
         }
         let Some(kind) = kind else {
@@ -72,6 +90,8 @@ impl NoticeCounter {
                 self.shown = None;
                 self.stack = None;
                 self.stack_candidate = None;
+                self.row = None;
+                self.row_candidate = None;
             }
             return None;
         };
@@ -88,7 +108,34 @@ impl NoticeCounter {
         self.missing = 0;
         self.stack = None;
         self.stack_candidate = None;
+        self.row = row;
+        self.row_candidate = None;
         Some(kind)
+    }
+
+    /// ¿Ha bajado la etiqueta a una línea nueva? Al añadirse una línea el
+    /// bloque se recentra y la última queda unos 10 px más abajo; si en cambio
+    /// desaparece una línea de arriba, sube, y eso no cuenta.
+    fn step_row(&mut self, row: Option<usize>) -> bool {
+        let (Some(row), Some(current)) = (row, self.row) else {
+            self.row = self.row.or(row);
+            return false;
+        };
+        if row.abs_diff(current) < ROW_JUMP {
+            self.row_candidate = None;
+            return false;
+        }
+        let seen = match self.row_candidate {
+            Some((candidate, seen)) if candidate.abs_diff(row) < ROW_JUMP => seen + 1,
+            _ => 1,
+        };
+        if seen < STACK_CONFIRM {
+            self.row_candidate = Some((row, seen));
+            return false;
+        }
+        self.row = Some(row);
+        self.row_candidate = None;
+        row > current
     }
 
     /// ¿Ha aparecido o cambiado el multiplicador del aviso actual?
@@ -153,7 +200,6 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
         let mut matches = MatchWatcher::default();
         let mut fuses = FuseCounter::default();
         let mut overlay_shown = false;
-        let mut hud_visible = false;
         let mut turn = 0u32;
         let mut failing = false;
         let mut previous = Reading::Nothing;
@@ -184,7 +230,6 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 && let Ok(zone) = grab_health_bar()
             {
                 let visible = scene::health_bar_visible(&zone);
-                hud_visible = visible;
                 diag.set_hud_visible(visible);
                 let change = match matches.step(now_ms(), visible) {
                     Some(MatchEvent::Started) => {
@@ -206,10 +251,10 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 }
             }
 
-            // El contador se muestra solo con el juego delante (o con el HUD de
-            // partida a la vista, por si el título de la ventana no se reconoce).
+            // El contador se muestra solo con el juego delante: GeForce NOW o
+            // Fortnite como ventana activa. En cualquier otra aplicación se oculta.
             if turn.is_multiple_of(5) {
-                let wanted = diag.show_overlay() && (capture::game_in_foreground() || hud_visible);
+                let wanted = diag.show_overlay() && capture::game_in_foreground();
                 if wanted != overlay_shown {
                     crate::set_overlay_visible(&app, wanted);
                     overlay_shown = wanted;
@@ -264,7 +309,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 None => "sin plantilla de ese tamaño".to_string(),
             };
             let now = now_ms();
-            let counted_kind = counter.step(reading.kind(), read.suffix);
+            let counted_kind = counter.step(reading.kind(), read.suffix, read.label_y);
             if let Some(kind) = counted_kind {
                 let pressed = diag.pressed_within(INPUT_WINDOW_MS);
                 let name = kind.as_str();
@@ -315,7 +360,7 @@ mod tests {
         readings
             .iter()
             .flat_map(|&(kind, frames)| std::iter::repeat_n(kind, frames))
-            .filter_map(|kind| counter.step(kind, None))
+            .filter_map(|kind| counter.step(kind, None, None))
             .collect()
     }
 
@@ -361,6 +406,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn la_misma_etiqueta_en_una_linea_nueva_cuenta_otra_vez() {
+        // COFRE (fila 66) ... luego ELIMINACIÓN debajo ... y otro COFRE en una
+        // tercera línea: el bloque se recentra y la etiqueta queda más abajo.
+        let mut counter = NoticeCounter::default();
+        let mut counted = Vec::new();
+        for (row, frames) in [(66, 10), (56, 10), (76, 12)] {
+            for _ in 0..frames {
+                counted.extend(counter.step(Some(Normal), None, Some(row)));
+            }
+        }
+        // Sube (se añadió ELIMINACIÓN debajo y aún se lee el COFRE de arriba):
+        // no cuenta. Baja a una línea nueva: cuenta.
+        assert_eq!(counted, [Normal, Normal]);
+    }
+
+    #[test]
+    fn el_vaiven_de_la_animacion_no_cuenta() {
+        let mut counter = NoticeCounter::default();
+        let mut counted = Vec::new();
+        for row in [66, 66, 67, 65, 66, 68, 66, 66, 64, 66, 66, 66] {
+            counted.extend(counter.step(Some(Rare), None, Some(row)));
+        }
+        assert_eq!(counted, [Rare]);
+    }
+
     const X2: &[&str] = &[
         "#...#.###.",
         ".#.#.#...#",
@@ -392,7 +463,7 @@ mod tests {
         let mut counted = Vec::new();
         for &(kind, suffix, frames) in readings {
             for _ in 0..frames {
-                counted.extend(counter.step(kind, suffix.map(Suffix::from_ascii)));
+                counted.extend(counter.step(kind, suffix.map(Suffix::from_ascii), None));
             }
         }
         counted
@@ -483,7 +554,7 @@ mod tests {
                     rgb: image.into_raw(),
                 };
                 let read = notice::read_scored(&roi);
-                if let Some(kind) = counter.step(read.reading.kind(), read.suffix) {
+                if let Some(kind) = counter.step(read.reading.kind(), read.suffix, read.label_y) {
                     eprintln!("{name}: {kind:?} en t = {:.1} s", i as f32 / 10.0);
                     counted.push(kind);
                 }
@@ -515,7 +586,7 @@ mod tests {
             let read = notice::read_scored(&roi);
             let kind = read.reading.kind();
             frames_read += usize::from(kind == Some(Normal));
-            counted.extend(counter.step(kind, read.suffix));
+            counted.extend(counter.step(kind, read.suffix, read.label_y));
         }
         assert_eq!(counted, [Normal]);
         // El aviso dura unos 20 frames; se lee bien en casi todos, no solo en dos.

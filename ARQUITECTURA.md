@@ -182,6 +182,16 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Quinta prueba real (2026-11-13)
+
+- **Cañón dorado: funciona.** Con la zona de búsqueda amplia contó los 10 cañones de la prueba (anillo +255 a +332 px).
+- **Avisos con varias líneas.** Al abrir tipos distintos seguidos, el aviso apila una línea por tipo ("COFRE RARO X2" / "COFRE DE ESPÍRITUS" / "COFRE RARO"); la **última es la más reciente**. El lector leía la primera que reconocía, y por eso a veces contaba un cofre de espíritus como raro o no contaba uno de tesoro. Ahora lee de abajo arriba.
+- Si la misma etiqueta aparece en una **línea nueva más abajo** (p. ej. COFRE / ELIMINACIÓN / COFRE), también cuenta: se detecta porque la etiqueta baja unos 10 px.
+- El final de la etiqueta tolera un trazo suelto pegado (borde de otro cartel) y texto ajeno de otro tamaño; la zona de lectura es más alta, para avisos de cinco o seis líneas.
+- **El contador sobre el juego solo aparece con el juego delante**: se mira qué programa es dueño de la ventana activa (GeForce NOW o Fortnite). Antes bastaba con que el título contuviera "Fortnite" o con ver algo verde donde va la barra de vida, y salía en otras aplicaciones.
+- Botón **Reiniciar estadísticas** en Configuración: pide confirmación y vuelve a la pantalla inicial.
+- Pendiente de decidir: contar "CONTENEDOR ABIERTO" como cofre de tesoro (cofres que se destruyen en vez de abrirse). Ese cartel sale con cualquier contenedor, así que hacen falta vídeos para ver si un cofre destruido se distingue de un barril u otro contenedor.
+
 ### Avisos tapados por otros textos (prueba 4, 2026-11-12)
 
 - Los recortes de la prueba 4 muestran avisos "+600 PE / COFRE" **sin contar**: el cartel de recoger botín, números de daño u otros textos se montaban sobre el aviso y alargaban la línea, y el lector exigía que la línea entera fuese la etiqueta. Pasa a menudo, porque tras abrir un cofre se mira el botín.

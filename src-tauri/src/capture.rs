@@ -14,17 +14,50 @@ pub struct Frame {
     pub rgb: Vec<u8>,
 }
 
-/// ¿Es del juego la ventana en primer plano? Se reconoce por el título
-/// (Fortnite o GeForce NOW), sin contar las ventanas de esta app.
+/// ¿Es del juego la ventana en primer plano? Se mira qué programa es su
+/// dueño (GeForce NOW o Fortnite); el título solo vale si nombra GeForce NOW.
+/// No basta con que el título contenga "Fortnite": también lo contienen una
+/// carpeta, un vídeo o una pestaña del navegador.
 #[cfg(windows)]
 pub fn game_in_foreground() -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
+    };
+    use windows::core::PWSTR;
 
-    let mut buffer = [0u16; 256];
-    // SAFETY: el búfer es válido y GetWindowTextW no escribe más de su tamaño.
-    let length = unsafe { GetWindowTextW(GetForegroundWindow(), &mut buffer) };
-    let title = String::from_utf16_lossy(&buffer[..length.max(0) as usize]).to_lowercase();
-    is_game_title(&title)
+    // SAFETY: los búferes son válidos y cada llamada recibe su tamaño; el
+    // handle del proceso se cierra antes de salir.
+    unsafe {
+        let window = GetForegroundWindow();
+        let mut title = [0u16; 256];
+        let length = GetWindowTextW(window, &mut title).max(0) as usize;
+        let title = String::from_utf16_lossy(&title[..length]).to_lowercase();
+
+        let mut program = String::new();
+        let mut process_id = 0u32;
+        GetWindowThreadProcessId(window, Some(&mut process_id));
+        if let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) {
+            let mut path = [0u16; 512];
+            let mut size = path.len() as u32;
+            if QueryFullProcessImageNameW(
+                process,
+                PROCESS_NAME_WIN32,
+                PWSTR(path.as_mut_ptr()),
+                &mut size,
+            )
+            .is_ok()
+            {
+                program = String::from_utf16_lossy(&path[..size as usize]).to_lowercase();
+            }
+            let _ = CloseHandle(process);
+        }
+        is_game_window(&program, &title)
+    }
 }
 
 #[cfg(not(windows))]
@@ -32,10 +65,16 @@ pub fn game_in_foreground() -> bool {
     false
 }
 
+/// `program`: ruta del ejecutable; `title`: título de la ventana. En minúsculas.
 #[cfg_attr(not(any(windows, test)), allow(dead_code))]
-fn is_game_title(lowercase_title: &str) -> bool {
-    (lowercase_title.contains("fortnite") || lowercase_title.contains("geforce now"))
-        && !lowercase_title.contains("chest counter")
+fn is_game_window(program: &str, title: &str) -> bool {
+    let executable = program.rsplit(['\\', '/']).next().unwrap_or(program);
+    if executable.contains("chest") {
+        return false; // esta misma app
+    }
+    executable.contains("geforcenow")
+        || executable.contains("fortniteclient")
+        || title.contains("geforce now")
 }
 
 /// Captura el monitor principal completo.
@@ -179,16 +218,35 @@ pub fn grab_rect(x: u32, y: u32, width: u32, height: u32) -> Result<Frame, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::is_game_title;
+    use super::is_game_window;
 
     #[test]
-    fn reconoce_el_juego_por_el_titulo_pero_no_a_esta_app() {
-        assert!(is_game_title("fortnite"));
-        assert!(is_game_title("fortnite® on geforce now"));
-        assert!(is_game_title("geforce now"));
-        assert!(!is_game_title("fortnite chest counter"));
-        assert!(!is_game_title("fortnite chest counter - contador"));
-        assert!(!is_game_title("documentos"));
-        assert!(!is_game_title(""));
+    fn el_juego_se_reconoce_por_su_programa_y_no_por_un_titulo_parecido() {
+        let gfn = r"c:\users\yo\appdata\local\nvidia corporation\geforcenow\cef\geforcenow.exe";
+        assert!(is_game_window(gfn, "fortnite® on geforce now"));
+        assert!(is_game_window(gfn, ""));
+        assert!(is_game_window(
+            r"c:\juegos\fortniteclient-win64-shipping.exe",
+            "fortnite"
+        ));
+        assert!(is_game_window(
+            r"c:\otro\reproductor.exe",
+            "fortnite on geforce now"
+        ));
+
+        // Otros programas, aunque su título mencione Fortnite.
+        assert!(!is_game_window(
+            r"c:\windows\explorer.exe",
+            "fortnitechestcounter"
+        ));
+        assert!(!is_game_window(
+            r"c:\program files\chrome.exe",
+            "fortnite - youtube"
+        ));
+        assert!(!is_game_window(
+            r"c:\apps\fortnitechestcounter.exe",
+            "fortnite chest counter"
+        ));
+        assert!(!is_game_window("", ""));
     }
 }

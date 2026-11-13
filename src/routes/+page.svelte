@@ -134,6 +134,9 @@
     if (!error) await save({ setupDone: true });
   }
 
+  // Reiniciar: pide confirmación y vuelve a la pantalla inicial.
+  let confirmingReset = $state(false);
+
   // Botón con el que el jugador abre los contenedores.
   let capturing = $state(false);
 
@@ -362,6 +365,28 @@
         />
         {t.requireInput}
       </label>
+    </section>
+
+    <section>
+      <div class="fila"><span>{t.resetTitle}</span></div>
+      <small class="linea">{t.resetHelp}</small>
+      <nav>
+        {#if confirmingReset}
+          <button
+            class="peligro"
+            onclick={() => {
+              confirmingReset = false;
+              initial = { normal: 0, rare: 0, spirit: 0, matches: 0 };
+              save({ setupDone: false });
+            }}
+          >
+            {t.resetConfirm}
+          </button>
+          <button onclick={() => (confirmingReset = false)}>{t.cancel}</button>
+        {:else}
+          <button onclick={() => (confirmingReset = true)}>{t.resetTitle}</button>
+        {/if}
+      </nav>
     </section>
   {/if}
 
@@ -638,6 +663,17 @@
   button:hover:not(:disabled) {
     background: var(--primary);
     border-color: var(--primary);
+  }
+
+  button.peligro {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  button.peligro:hover:not(:disabled) {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: var(--bg);
   }
 
   button:disabled {

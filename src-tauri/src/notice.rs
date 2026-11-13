@@ -27,10 +27,10 @@ use std::sync::OnceLock;
 
 /// Zona del aviso, en fracciones de la pantalla: x0, y0, x1, y1. Deja sitio
 /// para avisos de hasta cinco líneas, que crecen hacia arriba y hacia abajo.
-pub const ROI: (f32, f32, f32, f32) = (0.60, 0.235, 0.80, 0.41);
+pub const ROI: (f32, f32, f32, f32) = (0.60, 0.235, 0.80, 0.45);
 /// Tamaño de esa zona a 1366×768.
 const CANON_W: usize = 273;
-const CANON_H: usize = 134;
+const CANON_H: usize = 165;
 
 /// Una fila cuenta como texto con al menos estos píxeles.
 const MIN_ROW: usize = 3;
@@ -118,6 +118,8 @@ pub struct Read {
     pub closest: Option<(ChestType, f32)>,
     /// Multiplicador ("X2"…) que sigue a la etiqueta, si lo hay.
     pub suffix: Option<Suffix>,
+    /// Fila donde empieza la etiqueta leída (a 768 px de alto).
+    pub label_y: Option<usize>,
 }
 
 /// Rectángulo de la zona del aviso en una pantalla de `width`×`height`:
@@ -172,6 +174,7 @@ pub fn read_scored(roi: &Frame) -> Read {
         reading: Reading::Nothing,
         closest: None,
         suffix: None,
+        label_y: None,
     };
     let Some(rgb) = canonical(roi) else {
         return result;
@@ -179,7 +182,10 @@ pub fn read_scored(roi: &Frame) -> Read {
     let mask = Mask::from_text(&rgb);
     let sums = Sums::new(&mask);
     let lines = mask.lines();
-    for (index, line) in lines.iter().enumerate() {
+    // De abajo arriba: el aviso apila una línea por cada cosa distinta que se
+    // abre ("COFRE RARO X2" / "COFRE DE ESPÍRITUS" / "COFRE"), y la última es
+    // la más reciente.
+    for (index, line) in lines.iter().enumerate().rev() {
         // Encima de la etiqueta tiene que estar la cantidad, que es más alta.
         if !lines[..index]
             .iter()
@@ -210,6 +216,7 @@ pub fn read_scored(roi: &Frame) -> Read {
                 result.reading = Reading::Known(*kind);
                 result.closest = Some((*kind, score));
                 result.suffix = suffix;
+                result.label_y = Some(y0);
                 return result;
             }
         }
@@ -242,34 +249,52 @@ fn text_starts(sums: &Sums, line: &Line, width: usize, height: usize) -> Vec<(us
     starts
 }
 
-/// Qué hay justo a la derecha de una etiqueta que termina en la columna `x`:
-/// `Ok(None)` si nada, `Ok(Some(_))` si un multiplicador, `Err(())` si sigue
-/// otra palabra.
+/// Qué hay justo a la derecha de una etiqueta que termina hacia la columna
+/// `x`: `Ok(None)` si nada (o texto ajeno al aviso), `Ok(Some(_))` si un
+/// multiplicador, `Err(())` si la ventana corta una palabra o sigue otra
+/// palabra del mismo aviso.
 fn tail(mask: &Mask, sums: &Sums, x: usize, y: usize, height: usize) -> Result<Option<Suffix>, ()> {
     let (top, bottom) = (y as isize, (y + height) as isize);
     let used = |column: usize| sums.count(column as isize, top, column as isize + 1, bottom) > 0;
-    // Las tres primeras columnas pueden ser el final de la propia etiqueta.
-    let Some(start) = (x + 3..x + TAIL_SEARCH).find(|&column| used(column)) else {
+    // La etiqueta tiene que acabar aquí: un hueco de dos columnas cerca de `x`.
+    // Si no lo hay, la ventana ha caído en mitad de una palabra más larga.
+    // Se admite un trazo suelto pegado al final (el borde de otro cartel).
+    let Some(gap) = (x.saturating_sub(3)..=x + 8).find(|&c| !used(c) && !used(c + 1)) else {
+        return Err(());
+    };
+    let Some(start) = (gap + 2..gap + TAIL_SEARCH).find(|&column| used(column)) else {
         return Ok(None);
     };
-    if start - x > SUFFIX_MAX_GAP {
+    if start - gap > SUFFIX_MAX_GAP {
         return Ok(None);
     }
-    // El tramo sigue mientras no haya un hueco de más de dos columnas.
+    // El tramo sigue mientras no haya un hueco de más de cinco columnas.
     let mut end = start + 1;
-    let mut gap = 0;
+    let mut blank = 0;
     for column in start + 1..start + SUFFIX_WIDTH.end() + 8 {
         if used(column) {
             end = column + 1;
-            gap = 0;
+            blank = 0;
         } else {
-            gap += 1;
-            if gap > 5 {
+            blank += 1;
+            if blank > 5 {
                 break;
             }
         }
     }
-    if gap <= 5 || !SUFFIX_WIDTH.contains(&(end - start)) {
+    // Texto de otro tamaño o de otra línea (el cartel de recoger botín, un
+    // número de daño): sobresale por arriba o por abajo. No es del aviso.
+    let (left, right) = (start as isize, end as isize);
+    let outside =
+        sums.count(left, top - 5, right, top - 2) + sums.count(left, bottom + 2, right, bottom + 5);
+    if outside > 3 {
+        return Ok(None);
+    }
+    // Un trazo muy estrecho es ruido, no una palabra.
+    if end - start < 6 {
+        return Ok(None);
+    }
+    if blank <= 5 || !SUFFIX_WIDTH.contains(&(end - start)) {
         return Err(());
     }
     let suffix = mask.window(start, y, end - start, height);
@@ -335,7 +360,8 @@ fn canonical(roi: &Frame) -> Option<Vec<u8>> {
     }
     // Misma altura (p. ej. 1360×768 en vez de 1366×768): se usan los píxeles
     // tal cual, sin reescalar, recortando o rellenando alguna columna.
-    if h == CANON_H && w.abs_diff(CANON_W) <= 2 {
+    // También recortes más bajos del mismo ancho (los de versiones anteriores).
+    if h <= CANON_H && w.abs_diff(CANON_W) <= 2 {
         let mut rgb = vec![0; CANON_W * CANON_H * 3];
         let columns = w.min(CANON_W) * 3;
         for y in 0..h {
