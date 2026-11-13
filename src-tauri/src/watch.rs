@@ -183,10 +183,13 @@ fn grab_notice_zone() -> Result<Frame, String> {
 pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
     std::thread::spawn(move || {
         // Recortes del aviso de cada detección y de avisos desconocidos: sirven
-        // para comprobar aciertos y para crear plantillas de tipos nuevos.
+        // para comprobar aciertos y crear plantillas. Solo si el usuario lo activa.
         let samples = diag.dir().join("avisos");
         let _ = std::fs::create_dir_all(&samples);
         let save = |roi: &Frame, name: String| {
+            if !diag.save_samples() {
+                return;
+            }
             let _ = image::save_buffer(
                 samples.join(name),
                 &roi.rgb,

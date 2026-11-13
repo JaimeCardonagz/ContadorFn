@@ -40,6 +40,8 @@ pub struct Settings {
     pub hide_from_capture: bool,
     /// Mostrar el contador sobre el juego; si no, la app queda en segundo plano.
     pub show_overlay: bool,
+    /// Guardar un recorte de cada aviso leído, para depurar fallos.
+    pub save_samples: bool,
     /// Esquina del contador: "top-left", "top-right", "bottom-left" o "bottom-right".
     pub corner: String,
     /// Ya se preguntó al usuario cuántos cofres y partidas llevaba.
@@ -61,6 +63,7 @@ impl Default for Settings {
             require_input: false,
             hide_from_capture: true,
             show_overlay: true,
+            save_samples: false,
             corner: "top-left".into(),
             setup_done: false,
             overlay_match: "total".into(),
@@ -122,6 +125,7 @@ mod tests {
                 require_input: true,
                 hide_from_capture: false,
                 show_overlay: false,
+                save_samples: true,
                 corner: "bottom-right".into(),
                 setup_done: true,
                 overlay_match: "day".into(),

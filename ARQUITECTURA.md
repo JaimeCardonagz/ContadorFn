@@ -182,6 +182,13 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Versión 1.0.0 (2026-11-13)
+
+- Primera versión oficial para Windows, publicada como *Release* en GitHub.
+- **Cofres destruidos: descartado.** El vídeo `Debug/Contenedores.mp4` muestra que al destruir un cofre no aparece ningún aviso (ni "+PE COFRE" ni nada que lo distinga), así que no hay señal fiable que leer. Decisión del usuario: no se cuentan.
+- Guardar recortes de los avisos pasa a ser opcional y viene desactivado (pestaña Diagnóstico); el registro se reinicia al pasar de 1 MB.
+- Fuera de la 1.0: detección con el juego en inglés (faltan capturas), aviso de versión nueva, gráficos de historial y versión para Linux.
+
 ### Quinta prueba real (2026-11-13)
 
 - **Cañón dorado: funciona.** Con la zona de búsqueda amplia contó los 10 cañones de la prueba (anillo +255 a +332 px).

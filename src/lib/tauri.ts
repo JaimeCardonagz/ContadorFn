@@ -29,6 +29,7 @@ const sample: Record<string, unknown> = {
     requireInput: false,
     hideFromCapture: true,
     showOverlay: true,
+    saveSamples: false,
     corner: "top-left",
     setupDone: new URLSearchParams(location.search).get("inicio") === null,
     overlayMatch: "total",

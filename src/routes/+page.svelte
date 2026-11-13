@@ -47,6 +47,7 @@
     showOverlay: boolean;
     corner: string;
     setupDone: boolean;
+    saveSamples: boolean;
     overlayMatch: string;
     overlayTotal: boolean;
     overlayChests: string;
@@ -404,6 +405,16 @@
         </small>
         <small class="linea">{t.withInput}: {diag.detectedWithInput} / {diag.detected}</small>
         <small class="linea">{t.matchHud}: <b>{diag.hudVisible ? t.visible : t.notVisible}</b></small>
+      {/if}
+      {#if settings}
+        <label class="ajuste">
+          <input
+            type="checkbox"
+            checked={settings.saveSamples}
+            onchange={(e) => save({ saveSamples: e.currentTarget.checked })}
+          />
+          {t.saveSamples}
+        </label>
       {/if}
     </section>
 

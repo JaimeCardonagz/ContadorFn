@@ -80,12 +80,18 @@ pub struct Diag {
     binding: Mutex<Binding>,
     require_input: AtomicBool,
     show_overlay: AtomicBool,
+    save_samples: AtomicBool,
     /// Última pulsación del botón de abrir (epoch ms); 0 = ninguna.
     last_press: AtomicI64,
 }
 
 impl Diag {
     pub fn new(dir: PathBuf, settings: &Settings) -> Arc<Self> {
+        // El registro no crece sin límite: al pasar de 1 MB se empieza de nuevo.
+        let log = dir.join("diagnostico.log");
+        if fs::metadata(&log).is_ok_and(|meta| meta.len() > 1_000_000) {
+            let _ = fs::remove_file(&log);
+        }
         let state = DiagState {
             supported: cfg!(windows),
             dir: dir.display().to_string(),
@@ -101,6 +107,7 @@ impl Diag {
             binding: Mutex::new(settings.binding.clone()),
             require_input: AtomicBool::new(settings.require_input),
             show_overlay: AtomicBool::new(settings.show_overlay),
+            save_samples: AtomicBool::new(settings.save_samples),
             last_press: AtomicI64::new(0),
         })
     }
@@ -110,6 +117,11 @@ impl Diag {
         *self.binding.lock().unwrap_or_else(|e| e.into_inner()) = settings.binding.clone();
         self.require_input.store(settings.require_input, SeqCst);
         self.show_overlay.store(settings.show_overlay, SeqCst);
+        self.save_samples.store(settings.save_samples, SeqCst);
+    }
+
+    pub fn save_samples(&self) -> bool {
+        self.save_samples.load(SeqCst)
     }
 
     pub fn show_overlay(&self) -> bool {
