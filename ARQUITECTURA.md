@@ -182,6 +182,13 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Tercera prueba real: el multiplicador "X2" (2026-11-12)
+
+- Al abrir varios contenedores **iguales seguidos**, el juego no muestra un aviso nuevo: cambia la etiqueta a **"COFRE RARO X2"**, "X3"… (visto también en "CAJA DE MUNICIÓN X2"). Ese texto no se reconocía, y por eso se perdían cofres raros, que suelen estar juntos.
+- Ahora la etiqueta se reconoce con o sin multiplicador, y se cuenta **un contenedor más cada vez que el multiplicador aparece o cambia** (se compara el dibujo de la cifra; no hace falta leer el número). Esto sustituye a la antigua limitación de "dos iguales muy seguidos cuentan como uno".
+- Probado con los recortes reales de "X2" y con secuencias simuladas (X2 → X3 → X4). No hay todavía una grabación real continua de un X3.
+- Los avisos "ELIMINACIÓN" de esa prueba (misma anchura que "COFRE RARO") se ignoraron bien: puntúan 0,66–0,69 frente al mínimo de 0,86.
+
 ### Interfaz en dos ventanas (implementado, 2026-11-12)
 
 - **Contador sobre el juego**: ventana sin bordes, transparente, siempre encima y atravesable por los clics, en la esquina que elija el usuario. Solo texto: número de partida (histórico), cofres abiertos (histórico) y cofres de esta partida.

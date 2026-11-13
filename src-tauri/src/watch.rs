@@ -11,7 +11,7 @@ use crate::capture::{self, Frame};
 use crate::detect::{S1_PROMPT, S2_TYPE, S3_INPUT, S4_PROGRESS, S5_NOTICE};
 use crate::diag::Diag;
 use crate::fuse::{self, FuseCounter};
-use crate::notice::{self, Reading};
+use crate::notice::{self, Reading, Suffix};
 use crate::now_ms;
 use crate::scene::{self, MatchEvent, MatchWatcher};
 use crate::store::{ChestType, EndReason};
@@ -35,8 +35,16 @@ const UNKNOWN_SAMPLE_GAP_MS: i64 = 3_000;
 /// margen antes de verlo (anillo ~0,7 s + ~0,6 s hasta el aviso, con holgura).
 const INPUT_WINDOW_MS: i64 = 4_000;
 
+/// Lecturas seguidas del mismo multiplicador para darlo por visto.
+const STACK_CONFIRM: u32 = 3;
+/// Parecido a partir del cual dos multiplicadores son el mismo, y por debajo
+/// del cual son distintos; entre medias no se decide (texto en movimiento).
+const STACK_SAME: f32 = 0.8;
+const STACK_DIFFERENT: f32 = 0.7;
+
 /// Convierte lecturas sucesivas del aviso en aperturas: una por cada aviso
-/// nuevo, no una por cada frame en que se ve.
+/// nuevo, y una más cada vez que aparece o cambia su multiplicador ("X2",
+/// "X3"…), que es como el juego indica varios contenedores iguales seguidos.
 #[derive(Default)]
 pub struct NoticeCounter {
     /// Aviso que está en pantalla y ya se contó.
@@ -44,21 +52,26 @@ pub struct NoticeCounter {
     /// Tipo leído que aún no llega a `CONFIRM_FRAMES` lecturas seguidas.
     candidate: Option<(ChestType, u32)>,
     missing: u32,
+    /// Multiplicador ya contado en el aviso actual.
+    stack: Option<Suffix>,
+    stack_candidate: Option<(Suffix, u32)>,
 }
 
 impl NoticeCounter {
     /// Devuelve el tipo cuando hay que contar una apertura.
-    pub fn step(&mut self, kind: Option<ChestType>) -> Option<ChestType> {
+    pub fn step(&mut self, kind: Option<ChestType>, suffix: Option<Suffix>) -> Option<ChestType> {
         if kind.is_some() && kind == self.shown {
             self.candidate = None;
             self.missing = 0;
-            return None;
+            return if self.step_stack(suffix) { kind } else { None };
         }
         let Some(kind) = kind else {
             self.candidate = None;
             self.missing += 1;
             if self.missing >= CLEAR_FRAMES {
                 self.shown = None;
+                self.stack = None;
+                self.stack_candidate = None;
             }
             return None;
         };
@@ -73,7 +86,38 @@ impl NoticeCounter {
         self.shown = Some(kind);
         self.candidate = None;
         self.missing = 0;
+        self.stack = None;
+        self.stack_candidate = None;
         Some(kind)
+    }
+
+    /// ¿Ha aparecido o cambiado el multiplicador del aviso actual?
+    fn step_stack(&mut self, suffix: Option<Suffix>) -> bool {
+        let Some(suffix) = suffix else {
+            self.stack_candidate = None;
+            return false;
+        };
+        if let Some(current) = &self.stack {
+            let similarity = current.similarity(&suffix);
+            if similarity >= STACK_SAME {
+                self.stack_candidate = None;
+                return false;
+            }
+            if similarity > STACK_DIFFERENT {
+                return false;
+            }
+        }
+        let seen = match &self.stack_candidate {
+            Some((candidate, seen)) if candidate.similarity(&suffix) >= STACK_SAME => seen + 1,
+            _ => 1,
+        };
+        if seen < STACK_CONFIRM {
+            self.stack_candidate = Some((suffix, seen));
+            return false;
+        }
+        self.stack = Some(suffix);
+        self.stack_candidate = None;
+        true
     }
 }
 
@@ -190,14 +234,15 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 }
             }
 
-            let (reading, closest) = notice::read_scored(&roi);
-            let closest = match closest {
+            let read = notice::read_scored(&roi);
+            let reading = read.reading;
+            let closest = match read.closest {
                 Some((kind, score)) => format!("más parecida: {} {score:.2}", kind.as_str()),
                 None => "sin plantilla de ese tamaño".to_string(),
             };
             let now = now_ms();
             let counted_kind = counter
-                .step(reading.kind())
+                .step(reading.kind(), read.suffix)
                 .filter(|kind| *kind != ChestType::Ammo || diag.count_ammo());
             if let Some(kind) = counted_kind {
                 let pressed = diag.pressed_within(INPUT_WINDOW_MS);
@@ -249,7 +294,7 @@ mod tests {
         readings
             .iter()
             .flat_map(|&(kind, frames)| std::iter::repeat_n(kind, frames))
-            .filter_map(|kind| counter.step(kind))
+            .filter_map(|kind| counter.step(kind, None))
             .collect()
     }
 
@@ -295,6 +340,99 @@ mod tests {
         );
     }
 
+    const X2: &[&str] = &[
+        "#...#.###.",
+        ".#.#.#...#",
+        "..#.....#.",
+        ".#.#...#..",
+        "#...#.####",
+    ];
+    const X3: &[&str] = &[
+        "#...#.###.",
+        ".#.#.....#",
+        "..#....##.",
+        ".#.#.....#",
+        "#...#.###.",
+    ];
+    const X4: &[&str] = &[
+        "#...#...#.",
+        ".#.#...##.",
+        "..#...#.#.",
+        ".#.#.#####",
+        "#...#...#.",
+    ];
+
+    /// Como `count`, con el multiplicador que se ve en cada tramo.
+    /// (tipo leído, multiplicador a la vista, número de frames)
+    type Stretch<'a> = (Option<ChestType>, Option<&'a [&'a str]>, usize);
+
+    fn count_stacked(readings: &[Stretch]) -> Vec<ChestType> {
+        let mut counter = NoticeCounter::default();
+        let mut counted = Vec::new();
+        for &(kind, suffix, frames) in readings {
+            for _ in 0..frames {
+                counted.extend(counter.step(kind, suffix.map(Suffix::from_ascii)));
+            }
+        }
+        counted
+    }
+
+    #[test]
+    fn cada_multiplicador_nuevo_cuenta_un_contenedor_mas() {
+        // COFRE RARO, luego X2, X3 y X4 sin que el aviso desaparezca.
+        let readings = [
+            (Some(Rare), None, 10),
+            (Some(Rare), Some(X2), 12),
+            (Some(Rare), Some(X3), 12),
+            (Some(Rare), Some(X4), 12),
+            (None, None, 20),
+        ];
+        assert_eq!(count_stacked(&readings), [Rare, Rare, Rare, Rare]);
+    }
+
+    #[test]
+    fn el_mismo_multiplicador_muchos_frames_cuenta_una_sola_vez() {
+        let readings = [
+            (Some(Ammo), None, 5),
+            (Some(Ammo), Some(X2), 40),
+            (None, None, 20),
+        ];
+        assert_eq!(count_stacked(&readings), [Ammo, Ammo]);
+    }
+
+    #[test]
+    fn un_multiplicador_que_se_ve_un_instante_no_cuenta() {
+        let readings = [
+            (Some(Rare), None, 5),
+            (Some(Rare), Some(X2), 2),
+            (Some(Rare), None, 10),
+            (None, None, 20),
+        ];
+        assert_eq!(count_stacked(&readings), [Rare]);
+    }
+
+    #[test]
+    fn un_aviso_que_ya_llega_con_x2_cuenta_dos() {
+        let readings = [
+            (None, None, 5),
+            (Some(Normal), Some(X2), 15),
+            (None, None, 20),
+        ];
+        assert_eq!(count_stacked(&readings), [Normal, Normal]);
+    }
+
+    #[test]
+    fn el_multiplicador_no_se_arrastra_al_aviso_siguiente() {
+        let readings = [
+            (Some(Rare), Some(X2), 15),
+            (None, None, 10),
+            (Some(Rare), None, 10),
+            (Some(Rare), Some(X2), 10),
+            (None, None, 10),
+        ];
+        assert_eq!(count_stacked(&readings), [Rare, Rare, Rare, Rare]);
+    }
+
     /// Secuencias reales: recortes de la zona del aviso a 10 fps de los
     /// vídeos completos (locales; ver tools/extraer_avisos.sh).
     #[test]
@@ -323,7 +461,8 @@ mod tests {
                     height: image.height(),
                     rgb: image.into_raw(),
                 };
-                if let Some(kind) = counter.step(notice::read(&roi).kind()) {
+                let read = notice::read_scored(&roi);
+                if let Some(kind) = counter.step(read.reading.kind(), read.suffix) {
                     eprintln!("{name}: {kind:?} en t = {:.1} s", i as f32 / 10.0);
                     counted.push(kind);
                 }
@@ -352,9 +491,10 @@ mod tests {
                 height: image.height(),
                 rgb: image.into_raw(),
             };
-            let kind = notice::read(&roi).kind();
+            let read = notice::read_scored(&roi);
+            let kind = read.reading.kind();
             frames_read += usize::from(kind == Some(Normal));
-            counted.extend(counter.step(kind));
+            counted.extend(counter.step(kind, read.suffix));
         }
         assert_eq!(counted, [Normal]);
         // El aviso dura unos 20 frames; se lee bien en casi todos, no solo en dos.

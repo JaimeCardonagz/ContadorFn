@@ -66,6 +66,60 @@ impl Reading {
     }
 }
 
+/// El multiplicador que el juego añade a la etiqueta cuando se abren varios
+/// contenedores iguales seguidos ("COFRE RARO X2", "X3"…). No se lee el
+/// número: basta con saber si es el mismo dibujo que antes o ha cambiado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Suffix {
+    width: usize,
+    height: usize,
+    bits: Vec<bool>,
+}
+
+impl Suffix {
+    /// Parecido con otro multiplicador (intersección / unión). Solo se mira
+    /// la mitad derecha, donde está la cifra: la "X" es igual en todos.
+    pub fn similarity(&self, other: &Suffix) -> f32 {
+        let columns = self.width.min(other.width).div_ceil(2);
+        let height = self.height.max(other.height);
+        let at = |s: &Suffix, x: usize, y: usize| {
+            y < s.height && s.bits[y * s.width + (s.width - columns + x)]
+        };
+        let (mut both, mut either) = (0u32, 0u32);
+        for y in 0..height {
+            for x in 0..columns {
+                let (a, b) = (at(self, x, y), at(other, x, y));
+                both += u32::from(a && b);
+                either += u32::from(a || b);
+            }
+        }
+        if either == 0 {
+            0.0
+        } else {
+            both as f32 / either as f32
+        }
+    }
+
+    #[cfg(test)]
+    pub fn from_ascii(rows: &[&str]) -> Self {
+        let mask = Mask::from_ascii(rows);
+        Self {
+            width: mask.w,
+            height: mask.h,
+            bits: mask.bits,
+        }
+    }
+}
+
+/// Resultado completo de una lectura.
+pub struct Read {
+    pub reading: Reading,
+    /// Plantilla más parecida y su correlación, llegue o no al mínimo.
+    pub closest: Option<(ChestType, f32)>,
+    /// Multiplicador ("X2"…) que sigue a la etiqueta, si lo hay.
+    pub suffix: Option<Suffix>,
+}
+
 /// Rectángulo de la zona del aviso en una pantalla de `width`×`height`:
 /// (x, y, ancho, alto) en píxeles.
 pub fn roi_rect(width: u32, height: u32) -> (u32, u32, u32, u32) {
@@ -98,41 +152,69 @@ pub fn read_screen(screen: &Frame) -> Reading {
 /// Lee el aviso en un recorte que cubre exactamente la zona `ROI`.
 #[cfg(test)]
 pub fn read(roi: &Frame) -> Reading {
-    read_scored(roi).0
+    read_scored(roi).reading
 }
 
-/// Como `read`, y además la plantilla que más se parece a la última línea y
-/// su correlación, llegue o no al mínimo. Sirve para el registro.
-pub fn read_scored(roi: &Frame) -> (Reading, Option<(ChestType, f32)>) {
-    let nothing = (Reading::Nothing, None);
+/// Anchura extra que añade el multiplicador (espacio + "X" + cifra): unos 20 px.
+const SUFFIX_EXTRA: std::ops::RangeInclusive<usize> = 12..=30;
+
+/// Lee el aviso con todos los detalles (ver `Read`).
+pub fn read_scored(roi: &Frame) -> Read {
+    let mut result = Read {
+        reading: Reading::Nothing,
+        closest: None,
+        suffix: None,
+    };
     let Some(rgb) = canonical(roi) else {
-        return nothing;
+        return result;
     };
     let mask = Mask::from_text(&rgb);
     let lines = mask.lines();
-    let Some((label, above)) = lines.split_last() else {
-        return nothing;
+    let Some((line, above)) = lines.split_last() else {
+        return result;
     };
     // Encima de la etiqueta tiene que estar la cantidad, que es más alta.
     if !above.iter().any(|l| l.y1 - l.y0 >= AMOUNT_MIN_HEIGHT) {
-        return nothing;
+        return result;
     }
-    let label = Soft::from_mask(&mask.crop(label));
-    let mut best: Option<(ChestType, f32)> = None;
+    let label = mask.crop(line);
+    let whole = Soft::from_mask(&label);
+    let mut best_suffix = None;
     for (kind, template) in templates() {
-        if label.w.abs_diff(template.w) > 4 || label.h.abs_diff(template.h) > 2 {
+        if label.h.abs_diff(template.h) > 2 {
             continue;
         }
-        let score = label.best_correlation(template);
-        if best.is_none_or(|(_, top)| score > top) {
-            best = Some((*kind, score));
+        // Etiqueta sola, o etiqueta seguida del multiplicador.
+        let extra = label.w.saturating_sub(template.w);
+        let (score, suffix) = if label.w.abs_diff(template.w) <= 4 {
+            (whole.best_correlation(template), None)
+        } else if SUFFIX_EXTRA.contains(&extra) {
+            let prefix = label.columns(0, template.w);
+            let suffix = label.columns(template.w + 2, label.w);
+            (
+                Soft::from_mask(&prefix).best_correlation(template),
+                Some(suffix),
+            )
+        } else {
+            continue;
+        };
+        if result.closest.is_none_or(|(_, top)| score > top) {
+            result.closest = Some((*kind, score));
+            best_suffix = suffix;
         }
     }
-    let reading = match best {
+    result.reading = match result.closest {
         Some((kind, score)) if score >= MIN_SCORE => Reading::Known(kind),
         _ => Reading::Unknown,
     };
-    (reading, best)
+    if result.reading != Reading::Unknown {
+        result.suffix = best_suffix.map(|mask| Suffix {
+            width: mask.w,
+            height: mask.h,
+            bits: mask.bits,
+        });
+    }
+    result
 }
 
 fn templates() -> &'static [(ChestType, Soft)] {
@@ -275,6 +357,18 @@ impl Mask {
             }
         }
         lines
+    }
+
+    /// Las columnas [x0, x1) de la máscara.
+    fn columns(&self, x0: usize, x1: usize) -> Mask {
+        let (x0, x1) = (x0.min(self.w), x1.min(self.w));
+        Mask {
+            w: x1 - x0,
+            h: self.h,
+            bits: (0..self.h)
+                .flat_map(|y| self.bits[y * self.w + x0..y * self.w + x1].iter().copied())
+                .collect(),
+        }
     }
 
     /// La parte de la máscara que ocupa una línea.
@@ -535,6 +629,35 @@ mod tests {
     fn fotogramas_de_los_videos() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/frames");
         assert!(check_images(&dir, read_screen) >= 40);
+    }
+
+    /// "COFRE RARO X2" y "CAJA DE MUNICIÓN X2" reales: se reconoce el tipo y
+    /// se separa el multiplicador, que es el mismo dibujo en los dos.
+    #[test]
+    fn avisos_con_multiplicador() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/reales");
+        let load = |name: &str| {
+            let image = image::open(dir.join(name)).ok()?.into_rgb8();
+            Some(read_scored(&Frame {
+                width: image.width(),
+                height: image.height(),
+                rgb: image.into_raw(),
+            }))
+        };
+        let (Some(base), Some(rare), Some(ammo)) = (
+            load("rare_p3_base.png"),
+            load("rare_p3_x2.png"),
+            load("ammo_p3_x2.png"),
+        ) else {
+            eprintln!("sin recortes con multiplicador: prueba omitida");
+            return;
+        };
+        assert_eq!(base.reading, Reading::Known(ChestType::Rare));
+        assert!(base.suffix.is_none(), "sin multiplicador no hay sufijo");
+        assert_eq!(rare.reading, Reading::Known(ChestType::Rare));
+        assert_eq!(ammo.reading, Reading::Known(ChestType::Ammo));
+        let (rare, ammo) = (rare.suffix.unwrap(), ammo.suffix.unwrap());
+        assert!(rare.similarity(&ammo) >= 0.6, "{}", rare.similarity(&ammo));
     }
 
     /// Recortes guardados por la app en el equipo de pruebas (GeForce Now,
