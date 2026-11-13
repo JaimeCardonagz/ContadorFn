@@ -182,6 +182,13 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Avisos tapados por otros textos (prueba 4, 2026-11-12)
+
+- Los recortes de la prueba 4 muestran avisos "+600 PE / COFRE" **sin contar**: el cartel de recoger botín, números de daño u otros textos se montaban sobre el aviso y alargaban la línea, y el lector exigía que la línea entera fuese la etiqueta. Pasa a menudo, porque tras abrir un cofre se mira el botín.
+- Ahora la etiqueta se **busca dentro de cada línea**: en cada punto donde arranca un tramo de texto se compara una ventana del tamaño de cada plantilla, de la más larga a la más corta. Lo que sigue a la etiqueta decide: nada, o un multiplicador ("X2"); si sigue otra palabra, es otro texto y no cuenta.
+- Con los recortes guardados como "desconocido" en las pruebas 3 y 4, el lector nuevo reconoce 27 que antes no (parte eran avisos ya contados a medio animar; parte, cofres perdidos), y sigue ignorando "ELIMINACIÓN" y demás.
+- La prueba 4 se jugó con la versión anterior al registro del cañón, así que no aporta datos sobre el cañón dorado.
+
 ### Cambios tras la cuarta prueba (2026-11-12)
 
 - **Sin cajas de munición**: se eliminan por completo (tipo, plantillas, opción y pantalla). Los datos antiguos de munición se ignoran.

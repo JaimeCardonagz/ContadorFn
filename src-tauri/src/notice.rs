@@ -155,10 +155,18 @@ pub fn read(roi: &Frame) -> Reading {
     read_scored(roi).reading
 }
 
-/// Anchura extra que añade el multiplicador (espacio + "X" + cifra): unos 20 px.
-const SUFFIX_EXTRA: std::ops::RangeInclusive<usize> = 12..=30;
+/// Separación máxima entre la etiqueta y su multiplicador (un espacio).
+const SUFFIX_MAX_GAP: usize = 9;
+/// Anchura del multiplicador ("X2" mide unos 16 px; "X10", unos 24).
+const SUFFIX_WIDTH: std::ops::RangeInclusive<usize> = 8..=26;
+/// Hasta dónde se mira, a la derecha de la etiqueta, si sigue más texto.
+const TAIL_SEARCH: usize = 14;
 
 /// Lee el aviso con todos los detalles (ver `Read`).
+///
+/// La etiqueta se busca *dentro* de cada línea de texto, no como la línea
+/// entera: el cartel de recoger botín, los números de daño y otros textos se
+/// montan a menudo sobre el aviso y alargan la línea.
 pub fn read_scored(roi: &Frame) -> Read {
     let mut result = Read {
         reading: Reading::Nothing,
@@ -169,61 +177,153 @@ pub fn read_scored(roi: &Frame) -> Read {
         return result;
     };
     let mask = Mask::from_text(&rgb);
+    let sums = Sums::new(&mask);
     let lines = mask.lines();
-    let Some((line, above)) = lines.split_last() else {
-        return result;
-    };
-    // Encima de la etiqueta tiene que estar la cantidad, que es más alta.
-    if !above.iter().any(|l| l.y1 - l.y0 >= AMOUNT_MIN_HEIGHT) {
-        return result;
-    }
-    let label = mask.crop(line);
-    let whole = Soft::from_mask(&label);
-    let mut best_suffix = None;
-    for (kind, template) in templates() {
-        if label.h.abs_diff(template.h) > 2 {
+    for (index, line) in lines.iter().enumerate() {
+        // Encima de la etiqueta tiene que estar la cantidad, que es más alta.
+        if !lines[..index]
+            .iter()
+            .any(|l| l.y1 - l.y0 >= AMOUNT_MIN_HEIGHT)
+        {
             continue;
         }
-        // Etiqueta sola, o etiqueta seguida del multiplicador.
-        let extra = label.w.saturating_sub(template.w);
-        let (score, suffix) = if label.w.abs_diff(template.w) <= 4 {
-            (whole.best_correlation(template), None)
-        } else if SUFFIX_EXTRA.contains(&extra) {
-            let prefix = label.columns(0, template.w);
-            let suffix = label.columns(template.w + 2, label.w);
-            (
-                Soft::from_mask(&prefix).best_correlation(template),
-                Some(suffix),
-            )
-        } else {
-            continue;
-        };
-        if result.closest.is_none_or(|(_, top)| score > top) {
-            result.closest = Some((*kind, score));
-            best_suffix = suffix;
+        result.reading = Reading::Unknown;
+        // De la plantilla más larga a la más corta: "COFRE RARO" antes que "COFRE".
+        for (kind, template) in templates() {
+            if line.x1 - line.x0 + 4 < template.w || line.y1 - line.y0 + 2 < template.h {
+                continue;
+            }
+            for (x0, y0) in text_starts(&sums, line, template.w, template.h) {
+                let window = mask.window(x0, y0, template.w, template.h);
+                let score = Soft::from_mask(&window).best_correlation(template);
+                if result.closest.is_none_or(|(_, top)| score > top) {
+                    result.closest = Some((*kind, score));
+                }
+                if score < MIN_SCORE {
+                    continue;
+                }
+                // Lo que sigue a la etiqueta decide: nada, o un multiplicador.
+                // Si sigue otra palabra, es otro texto que solo empieza igual.
+                let Ok(suffix) = tail(&mask, &sums, x0 + template.w, y0, template.h) else {
+                    continue;
+                };
+                result.reading = Reading::Known(*kind);
+                result.closest = Some((*kind, score));
+                result.suffix = suffix;
+                return result;
+            }
         }
-    }
-    result.reading = match result.closest {
-        Some((kind, score)) if score >= MIN_SCORE => Reading::Known(kind),
-        _ => Reading::Unknown,
-    };
-    if result.reading != Reading::Unknown {
-        result.suffix = best_suffix.map(|mask| Suffix {
-            width: mask.w,
-            height: mask.h,
-            bits: mask.bits,
-        });
     }
     result
 }
 
+/// Posiciones de `line` donde puede empezar un texto de `width`×`height`:
+/// columnas donde arranca un tramo de texto y, en ellas, filas donde arranca.
+fn text_starts(sums: &Sums, line: &Line, width: usize, height: usize) -> Vec<(usize, usize)> {
+    let (y0, y1) = (line.y0 as isize, line.y1 as isize);
+    let mut starts = Vec::new();
+    for x in line.x0..line.x1 {
+        let column = x as isize;
+        if sums.count(column, y0, column + 1, y1) == 0
+            || (x > line.x0 && sums.count(column - 1, y0, column, y1) > 0)
+        {
+            continue;
+        }
+        let right = column + width as isize;
+        for y in line.y0..(line.y1 + 2).saturating_sub(height).max(line.y0 + 1) {
+            let row = y as isize;
+            if sums.count(column, row, right, row + 1) > 0
+                && (y == line.y0 || sums.count(column, row - 1, right, row) == 0)
+            {
+                starts.push((x, y));
+            }
+        }
+    }
+    starts
+}
+
+/// Qué hay justo a la derecha de una etiqueta que termina en la columna `x`:
+/// `Ok(None)` si nada, `Ok(Some(_))` si un multiplicador, `Err(())` si sigue
+/// otra palabra.
+fn tail(mask: &Mask, sums: &Sums, x: usize, y: usize, height: usize) -> Result<Option<Suffix>, ()> {
+    let (top, bottom) = (y as isize, (y + height) as isize);
+    let used = |column: usize| sums.count(column as isize, top, column as isize + 1, bottom) > 0;
+    // Las tres primeras columnas pueden ser el final de la propia etiqueta.
+    let Some(start) = (x + 3..x + TAIL_SEARCH).find(|&column| used(column)) else {
+        return Ok(None);
+    };
+    if start - x > SUFFIX_MAX_GAP {
+        return Ok(None);
+    }
+    // El tramo sigue mientras no haya un hueco de más de dos columnas.
+    let mut end = start + 1;
+    let mut gap = 0;
+    for column in start + 1..start + SUFFIX_WIDTH.end() + 8 {
+        if used(column) {
+            end = column + 1;
+            gap = 0;
+        } else {
+            gap += 1;
+            if gap > 5 {
+                break;
+            }
+        }
+    }
+    if gap <= 5 || !SUFFIX_WIDTH.contains(&(end - start)) {
+        return Err(());
+    }
+    let suffix = mask.window(start, y, end - start, height);
+    Ok(Some(Suffix {
+        width: suffix.w,
+        height: suffix.h,
+        bits: suffix.bits,
+    }))
+}
+
+/// Tabla de sumas de una máscara: cuántos píxeles hay en cualquier rectángulo.
+pub(crate) struct Sums {
+    w: usize,
+    h: usize,
+    table: Vec<u32>,
+}
+
+impl Sums {
+    pub fn new(mask: &Mask) -> Self {
+        let (w, h) = (mask.w, mask.h);
+        let mut table = vec![0u32; (w + 1) * (h + 1)];
+        for y in 0..h {
+            let mut row = 0;
+            for x in 0..w {
+                row += u32::from(mask.bits[y * w + x]);
+                table[(y + 1) * (w + 1) + x + 1] = table[y * (w + 1) + x + 1] + row;
+            }
+        }
+        Self { w, h, table }
+    }
+
+    /// Píxeles en el rectángulo [x0, x1) × [y0, y1), recortado a la máscara.
+    pub fn count(&self, x0: isize, y0: isize, x1: isize, y1: isize) -> u32 {
+        let cx = |v: isize| v.clamp(0, self.w as isize) as usize;
+        let cy = |v: isize| v.clamp(0, self.h as isize) as usize;
+        let (x0, x1, y0, y1) = (cx(x0), cx(x1), cy(y0), cy(y1));
+        if x1 <= x0 || y1 <= y0 {
+            return 0;
+        }
+        let at = |x: usize, y: usize| self.table[y * (self.w + 1) + x];
+        at(x1, y1) + at(x0, y0) - at(x1, y0) - at(x0, y1)
+    }
+}
+
+/// Plantillas difuminadas, de la más ancha a la más estrecha.
 fn templates() -> &'static [(ChestType, Soft)] {
     static SOFT: OnceLock<Vec<(ChestType, Soft)>> = OnceLock::new();
     SOFT.get_or_init(|| {
-        TEMPLATES
+        let mut all: Vec<_> = TEMPLATES
             .iter()
             .map(|(kind, rows)| (*kind, Soft::from_mask(&Mask::from_ascii(rows))))
-            .collect()
+            .collect();
+        all.sort_by_key(|(_, soft)| std::cmp::Reverse(soft.w));
+        all
     })
 }
 
@@ -359,29 +459,15 @@ impl Mask {
         lines
     }
 
-    /// Las columnas [x0, x1) de la máscara.
-    fn columns(&self, x0: usize, x1: usize) -> Mask {
-        let (x0, x1) = (x0.min(self.w), x1.min(self.w));
-        Mask {
-            w: x1 - x0,
-            h: self.h,
-            bits: (0..self.h)
-                .flat_map(|y| self.bits[y * self.w + x0..y * self.w + x1].iter().copied())
-                .collect(),
-        }
-    }
-
-    /// La parte de la máscara que ocupa una línea.
-    fn crop(&self, line: &Line) -> Mask {
-        let (w, h) = (line.x1 - line.x0, line.y1 - line.y0);
+    /// El rectángulo de `w`×`h` que empieza en (x0, y0); fuera de la máscara
+    /// es vacío.
+    fn window(&self, x0: usize, y0: usize, w: usize, h: usize) -> Mask {
         Mask {
             w,
             h,
             bits: (0..h)
-                .flat_map(|y| {
-                    let start = (line.y0 + y) * self.w + line.x0;
-                    self.bits[start..start + w].iter().copied()
-                })
+                .flat_map(|y| (0..w).map(move |x| (x0 + x, y0 + y)))
+                .map(|(x, y)| self.get(x as isize, y as isize))
                 .collect(),
         }
     }
@@ -620,6 +706,35 @@ mod tests {
             checked += 1;
         }
         checked
+    }
+
+    /// Herramienta: lee todos los recortes de la carpeta `AVISOS_DIR` y dice
+    /// qué entiende en cada uno. Uso:
+    /// `AVISOS_DIR=... cargo test revisar_carpeta -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn revisar_carpeta() {
+        let dir = std::env::var("AVISOS_DIR").expect("falta AVISOS_DIR");
+        let mut files: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        files.sort();
+        for path in files {
+            let image = image::open(&path).unwrap().into_rgb8();
+            let read = read_scored(&Frame {
+                width: image.width(),
+                height: image.height(),
+                rgb: image.into_raw(),
+            });
+            println!(
+                "{} -> {:?} {:?} sufijo={}",
+                path.file_name().unwrap().to_string_lossy(),
+                read.reading,
+                read.closest,
+                read.suffix.is_some()
+            );
+        }
     }
 
     /// Fotogramas completos a 1366×768 sacados de los vídeos de OBS (locales,

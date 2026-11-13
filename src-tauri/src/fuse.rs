@@ -9,7 +9,7 @@
 //! casi todas las posiciones.
 
 use crate::capture::Frame;
-use crate::notice::Mask;
+use crate::notice::{Mask, Sums};
 use crate::notice_templates::FUSE_PROMPT;
 use image::imageops::{self, FilterType};
 
@@ -31,40 +31,6 @@ pub fn roi_rect(width: u32, height: u32) -> (u32, u32, u32, u32) {
     let x1 = (ROI.2 * width as f32) as u32;
     let y1 = (ROI.3 * height as f32) as u32;
     (x0, y0, x1 - x0, y1 - y0)
-}
-
-/// Tabla de sumas de una máscara: cuántos píxeles hay en cualquier rectángulo.
-struct Sums {
-    w: usize,
-    h: usize,
-    table: Vec<u32>,
-}
-
-impl Sums {
-    fn new(mask: &Mask) -> Self {
-        let (w, h) = (mask.w, mask.h);
-        let mut table = vec![0u32; (w + 1) * (h + 1)];
-        for y in 0..h {
-            let mut row = 0;
-            for x in 0..w {
-                row += u32::from(mask.bits[y * w + x]);
-                table[(y + 1) * (w + 1) + x + 1] = table[y * (w + 1) + x + 1] + row;
-            }
-        }
-        Self { w, h, table }
-    }
-
-    /// Píxeles en el rectángulo [x0, x1) × [y0, y1), recortado a la máscara.
-    fn count(&self, x0: isize, y0: isize, x1: isize, y1: isize) -> u32 {
-        let cx = |v: isize| v.clamp(0, self.w as isize) as usize;
-        let cy = |v: isize| v.clamp(0, self.h as isize) as usize;
-        let (x0, x1, y0, y1) = (cx(x0), cx(x1), cy(y0), cy(y1));
-        if x1 <= x0 || y1 <= y0 {
-            return 0;
-        }
-        let at = |x: usize, y: usize| self.table[y * (self.w + 1) + x];
-        at(x1, y1) + at(x0, y0) - at(x1, y0) - at(x0, y1)
-    }
 }
 
 /// Si el recuadro "ENCENDER MECHA" está en `roi`, devuelve cuántos píxeles
