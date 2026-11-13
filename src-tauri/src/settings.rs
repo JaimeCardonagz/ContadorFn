@@ -44,8 +44,13 @@ pub struct Settings {
     pub corner: String,
     /// Ya se preguntó al usuario cuántos cofres y partidas llevaba.
     pub setup_done: bool,
-    /// Contar también las cajas de munición.
-    pub count_ammo: bool,
+    /// Número de partida en el contador: "off", "day" (de la sesión) o "total".
+    pub overlay_match: String,
+    /// Mostrar el total histórico de cofres en el contador.
+    pub overlay_total: bool,
+    /// Cofres de la partida en el contador: "off", "sum" (los tres sumados) o
+    /// "types" (tesoro, raro y espíritus por separado).
+    pub overlay_chests: String,
 }
 
 impl Default for Settings {
@@ -58,7 +63,9 @@ impl Default for Settings {
             show_overlay: true,
             corner: "top-left".into(),
             setup_done: false,
-            count_ammo: true,
+            overlay_match: "total".into(),
+            overlay_total: true,
+            overlay_chests: "sum".into(),
         }
     }
 }
@@ -117,7 +124,9 @@ mod tests {
                 show_overlay: false,
                 corner: "bottom-right".into(),
                 setup_done: true,
-                count_ammo: false,
+                overlay_match: "day".into(),
+                overlay_total: false,
+                overlay_chests: "types".into(),
             };
             assert_eq!(Settings::from_json(Some(&settings.to_json())), settings);
         }

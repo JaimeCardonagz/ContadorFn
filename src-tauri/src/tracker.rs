@@ -16,7 +16,7 @@ pub struct Stats {
     pub in_match: bool,
     pub session_active: bool,
     pub session_started_at: Option<i64>,
-    /// Partida en curso o, si no hay, la última de la sesión.
+    /// Partida en curso; cero si no hay ninguna.
     pub match_counts: Counts,
     pub session_counts: Counts,
     pub total_counts: Counts,
@@ -32,7 +32,7 @@ pub struct Tracker {
     /// (id, inicio) de la sesión activa.
     session: Option<(i64, i64)>,
     active_match: Option<i64>,
-    /// Partida cuyos cofres se muestran: la activa o la última terminada.
+    /// Partida cuyos cofres se muestran: la activa.
     shown_match: Option<i64>,
     last_activity: i64,
 }
@@ -102,6 +102,8 @@ impl Tracker {
         if let Some(id) = self.active_match.take() {
             self.store.end_match(id, now, reason)?;
             self.last_activity = now;
+            // Fuera de partida el contador de partida vuelve a cero.
+            self.shown_match = None;
         }
         Ok(())
     }
@@ -240,10 +242,7 @@ mod tests {
         assert!(s.in_match && s.session_active);
         assert_eq!(s.session_started_at, Some(1_000));
         for c in [s.match_counts, s.session_counts, s.total_counts] {
-            assert_eq!(
-                (c.normal, c.rare, c.spirit, c.ammo, c.total),
-                (2, 1, 0, 0, 3)
-            );
+            assert_eq!((c.normal, c.rare, c.spirit, c.total), (2, 1, 0, 3));
         }
     }
 
@@ -254,10 +253,11 @@ mod tests {
         chest(&mut t, 2_000, ChestType::Normal);
         t.match_ended(3_000, EndReason::Eliminated).unwrap();
 
-        // Terminada la partida se sigue mostrando su total.
+        // Terminada la partida, su contador vuelve a cero.
         let s = t.stats().unwrap();
         assert!(!s.in_match);
-        assert_eq!(s.match_counts.total, 1);
+        assert_eq!(s.match_counts.total, 0);
+        assert_eq!(s.session_counts.total, 1);
 
         t.match_started(4_000).unwrap();
         chest(&mut t, 5_000, ChestType::Spirit);
@@ -395,7 +395,7 @@ mod tests {
         assert_eq!(t.stats().unwrap().total_counts.normal, 6);
 
         assert!(!t.adjust_total(4_000, ChestType::Normal, -7).unwrap());
-        assert!(!t.adjust_total(4_000, ChestType::Ammo, -1).unwrap());
+        assert!(!t.adjust_total(4_000, ChestType::Spirit, -1).unwrap());
         let c = t.stats().unwrap().total_counts;
         assert_eq!(
             (c.normal, c.total),
@@ -452,20 +452,6 @@ mod tests {
     }
 
     #[test]
-    fn la_municion_se_cuenta_aparte_y_no_suma_a_los_cofres() {
-        let mut t = tracker();
-        chest(&mut t, 1_000, ChestType::Normal);
-        chest(&mut t, 2_000, ChestType::Ammo);
-        chest(&mut t, 3_000, ChestType::Ammo);
-        t.adjust_total(4_000, ChestType::Ammo, 10).unwrap();
-
-        let s = t.stats().unwrap();
-        assert_eq!((s.match_counts.ammo, s.match_counts.total), (2, 1));
-        assert_eq!((s.session_counts.ammo, s.session_counts.total), (2, 1));
-        assert_eq!((s.total_counts.ammo, s.total_counts.total), (12, 1));
-    }
-
-    #[test]
     fn los_ajustes_se_guardan_y_sobreviven_a_un_reinicio() {
         use crate::settings::Binding;
         let mut t = tracker();
@@ -487,9 +473,9 @@ mod tests {
     #[test]
     fn el_punto_de_partida_borra_todo_lo_anterior_y_luego_sigue_sumando() {
         let mut t = tracker();
-        // Había de todo: cofres y munición contados, partidas y ajustes a mano.
+        // Había de todo: cofres contados, partidas y ajustes a mano.
         chest(&mut t, 1_000, ChestType::Normal);
-        chest(&mut t, 2_000, ChestType::Ammo);
+        chest(&mut t, 2_000, ChestType::Rare);
         t.adjust_total(3_000, ChestType::Normal, 500).unwrap();
         t.adjust_matches(3_000, 40).unwrap();
 
@@ -501,10 +487,7 @@ mod tests {
         t.reset_with_totals(4_000, &start, 60).unwrap();
         let s = t.stats().unwrap();
         let c = s.total_counts;
-        assert_eq!(
-            (c.normal, c.rare, c.spirit, c.ammo, c.total),
-            (300, 20, 5, 0, 325)
-        );
+        assert_eq!((c.normal, c.rare, c.spirit, c.total), (300, 20, 5, 325));
         assert_eq!(s.total_matches, 60);
         assert!(
             !s.in_match && !s.session_active,

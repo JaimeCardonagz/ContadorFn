@@ -2,8 +2,9 @@
   import { invoke, listen } from "$lib/tauri";
   import { onMount } from "svelte";
   import { texts, type Lang } from "$lib/i18n";
+  import OverlayText from "$lib/OverlayText.svelte";
 
-  type Counts = { normal: number; rare: number; spirit: number; ammo: number; total: number };
+  type Counts = { normal: number; rare: number; spirit: number; total: number };
   type Stats = {
     inMatch: boolean;
     sessionActive: boolean;
@@ -46,7 +47,9 @@
     showOverlay: boolean;
     corner: string;
     setupDone: boolean;
-    countAmmo: boolean;
+    overlayMatch: string;
+    overlayTotal: boolean;
+    overlayChests: string;
   };
 
   let stats = $state<Stats | null>(null);
@@ -161,7 +164,7 @@
     save({ binding: { device: "mouse", button: event.button } });
   }
 
-  const simulated = ["match_start", "normal", "rare", "spirit", "ammo", "eliminated", "victory", "lobby"];
+  const simulated = ["match_start", "normal", "rare", "spirit", "eliminated", "victory", "lobby"];
 </script>
 
 <svelte:window
@@ -175,9 +178,6 @@
     <span class="chip tesoro">{t.treasure} <b>{c.normal}</b></span>
     <span class="chip raro">{t.rare} <b>{c.rare}</b></span>
     <span class="chip espiritu">{t.spirit} <b>{c.spirit}</b></span>
-    {#if settings?.countAmmo !== false}
-      <span class="chip municion">{t.ammo} <b>{c.ammo}</b></span>
-    {/if}
   </div>
 {/snippet}
 
@@ -247,7 +247,7 @@
         <tr><th></th><th>{t.total}</th><th>{t.perMatch}</th></tr>
       </thead>
       <tbody>
-        {#each (["normal", "rare", "spirit", "ammo"] as const).filter((k) => k !== "ammo" || settings?.countAmmo !== false) as kind}
+        {#each ["normal", "rare", "spirit"] as const as kind}
           <tr>
             <td>{t.kinds[kind]}</td>
             <td>{stats.totalCounts[kind]}</td>
@@ -282,6 +282,37 @@
         />
         {t.showOverlay}
       </label>
+      <div class="fila"><span>{t.overlayShows}</span></div>
+      <label class="ajuste">
+        {t.optMatch}
+        <select value={settings.overlayMatch} onchange={(e) => save({ overlayMatch: e.currentTarget.value })}>
+          <option value="off">{t.optOff}</option>
+          <option value="day">{t.optDay}</option>
+          <option value="total">{t.optAllTime}</option>
+        </select>
+      </label>
+      <label class="ajuste">
+        <input
+          type="checkbox"
+          checked={settings.overlayTotal}
+          onchange={(e) => save({ overlayTotal: e.currentTarget.checked })}
+        />
+        {t.optTotal}
+      </label>
+      <label class="ajuste">
+        {t.optChests}
+        <select value={settings.overlayChests} onchange={(e) => save({ overlayChests: e.currentTarget.value })}>
+          <option value="off">{t.optOff}</option>
+          <option value="sum">{t.optSum}</option>
+          <option value="types">{t.optTypes}</option>
+        </select>
+      </label>
+      {#if stats}
+        <small class="linea">{t.preview}</small>
+        <div class="muestra">
+          <OverlayText {stats} options={settings} {t} right={settings.corner.endsWith("right")} />
+        </div>
+      {/if}
       <label class="ajuste">
         {t.corner}
         <select
@@ -301,14 +332,6 @@
           onchange={(e) => save({ hideFromCapture: e.currentTarget.checked })}
         />
         {t.hideFromCapture}
-      </label>
-      <label class="ajuste">
-        <input
-          type="checkbox"
-          checked={settings.countAmmo}
-          onchange={(e) => save({ countAmmo: e.currentTarget.checked })}
-        />
-        {t.countAmmo}
       </label>
     </section>
 
@@ -424,7 +447,6 @@
     --tesoro: #fbbf24;
     --raro: #60a5fa;
     --espiritu: #e879f9;
-    --municion: #a3e635;
   }
 
   :global(html, body) {
@@ -576,8 +598,13 @@
     background: var(--espiritu);
   }
 
-  .chip.municion::before {
-    background: var(--municion);
+  /* Vista previa del contador sobre un fondo parecido al del juego. */
+  .muestra {
+    margin: 6px 0 10px;
+    padding: 0 0 38px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #3b82c4, #7fb7d9 45%, #c9a45c);
+    overflow: hidden;
   }
 
   nav {

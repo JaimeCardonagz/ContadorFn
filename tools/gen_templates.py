@@ -22,9 +22,6 @@ SOURCES = [
     ('Rare', 'COFRE RARO, vídeo de OBS (falta una captura real)', 'Debug/frames/rare_14.2.png', True),
     ('Spirit', 'COFRE DE ESPÍRITUS, vídeo de OBS', 'Debug/frames/spirit_11.2.png', True),
     ('Spirit', 'COFRE DE ESPÍRITUS, captura real', REAL + '1794520028132-spirit.png', False),
-    ('Ammo', 'CAJA DE MUNICIÓN, vídeo de OBS', 'Debug/frames/ammo_6.6.png', True),
-    ('Ammo', 'CAJA DE MUNICIÓN, captura real', REAL + '1794519915962-ammo.png', False),
-    ('Ammo', 'CAJA DE MUNICIÓN, captura real deslizándose', REAL + '1794519915761-desconocido.png', False),
 ]
 
 out = ['//! Plantillas de las etiquetas del aviso de experiencia (español de',
@@ -41,4 +38,7 @@ for kind, desc, path, full in SOURCES:
     out.append('    ]),')
     print(f'{kind:7s} {len(mask[0])}x{len(mask)}  {desc}')
 out.append('];')
-open('src-tauri/src/notice_templates.rs', 'w').write('\n'.join(out) + '\n')
+path = 'src-tauri/src/notice_templates.rs'
+previous = open(path).read()
+fuse = previous[previous.index('/// Texto "ENCENDER MECHA"'):]  # plantilla del cañón: se conserva
+open(path, 'w').write('\n'.join(out) + '\n\n' + fuse)

@@ -216,21 +216,44 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 }
             }
 
-            // Cañón dorado: no da aviso de experiencia; cuenta como cofre de tesoro.
-            let fuse_zone = capture::screen_size().and_then(|(width, height)| {
-                let (x, y, w, h) = fuse::roi_rect(width, height);
-                capture::grab_rect(x, y, w, h)
-            });
-            if let Ok(zone) = fuse_zone
-                && fuses.step(fuse::read(&zone))
-            {
-                let pressed = diag.pressed_within(INPUT_WINDOW_MS);
-                let counted = crate::update(&app, |tracker, now| {
-                    tracker.chest_opened(now, ChestType::Normal, 0.4, S1_PROMPT | S4_PROGRESS)
+            // Cañón dorado: no da aviso de experiencia; cuenta como cofre de
+            // tesoro. Se mira cinco veces por segundo (la zona es grande).
+            if turn.is_multiple_of(2) {
+                let zone = capture::screen_size().and_then(|(width, height)| {
+                    let (x, y, w, h) = fuse::roi_rect(width, height);
+                    capture::grab_rect(x, y, w, h)
                 });
-                match counted {
-                    Ok(_) => diag.detected("normal", pressed, "cañón dorado"),
-                    Err(error) => diag.log(&format!("no se pudo guardar el cañón: {error}")),
+                let was_visible = fuses.visible();
+                let grown = zone.ok().and_then(|zone| fuses.step(fuse::read(&zone)));
+                if fuses.visible() && !was_visible {
+                    diag.log("cañón: recuadro ENCENDER MECHA a la vista");
+                }
+                match grown {
+                    Some(grown) if grown >= fuse::RING_DELTA => {
+                        let pressed = diag.pressed_within(INPUT_WINDOW_MS);
+                        let counted = crate::update(&app, |tracker, now| {
+                            tracker.chest_opened(
+                                now,
+                                ChestType::Normal,
+                                0.4,
+                                S1_PROMPT | S4_PROGRESS,
+                            )
+                        });
+                        match counted {
+                            Ok(_) => diag.detected(
+                                "normal",
+                                pressed,
+                                &format!("cañón dorado, anillo +{grown}"),
+                            ),
+                            Err(error) => {
+                                diag.log(&format!("no se pudo guardar el cañón: {error}"))
+                            }
+                        }
+                    }
+                    Some(grown) => diag.log(&format!(
+                        "cañón: el recuadro desapareció sin encenderse (anillo +{grown})"
+                    )),
+                    None => {}
                 }
             }
 
@@ -241,9 +264,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 None => "sin plantilla de ese tamaño".to_string(),
             };
             let now = now_ms();
-            let counted_kind = counter
-                .step(reading.kind(), read.suffix)
-                .filter(|kind| *kind != ChestType::Ammo || diag.count_ammo());
+            let counted_kind = counter.step(reading.kind(), read.suffix);
             if let Some(kind) = counted_kind {
                 let pressed = diag.pressed_within(INPUT_WINDOW_MS);
                 let name = kind.as_str();
@@ -286,7 +307,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ChestType::{Ammo, Normal, Rare, Spirit};
+    use ChestType::{Normal, Rare, Spirit};
 
     /// Pasa una secuencia de lecturas y devuelve lo que se contó.
     fn count(readings: &[(Option<ChestType>, usize)]) -> Vec<ChestType> {
@@ -333,10 +354,10 @@ mod tests {
 
     #[test]
     fn un_aviso_que_cambia_de_tipo_sin_desaparecer_cuenta_los_dos() {
-        // Caja de munición y, enseguida, un cofre raro.
+        // Un cofre de espíritus y, enseguida, uno raro.
         assert_eq!(
-            count(&[(Some(Ammo), 10), (Some(Rare), 15), (None, 10)]),
-            [Ammo, Rare]
+            count(&[(Some(Spirit), 10), (Some(Rare), 15), (None, 10)]),
+            [Spirit, Rare]
         );
     }
 
@@ -393,11 +414,11 @@ mod tests {
     #[test]
     fn el_mismo_multiplicador_muchos_frames_cuenta_una_sola_vez() {
         let readings = [
-            (Some(Ammo), None, 5),
-            (Some(Ammo), Some(X2), 40),
+            (Some(Spirit), None, 5),
+            (Some(Spirit), Some(X2), 40),
             (None, None, 20),
         ];
-        assert_eq!(count_stacked(&readings), [Ammo, Ammo]);
+        assert_eq!(count_stacked(&readings), [Spirit, Spirit]);
     }
 
     #[test]
@@ -440,7 +461,7 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/avisos-10fps");
         let cases = [
             ("cofres-prueba", vec![Normal, Normal, Normal, Normal]),
-            ("raro-municion", vec![Ammo, Rare]),
+            ("raro-municion", vec![Rare]),
             ("espiritu", vec![Spirit]),
         ];
         for (name, expected) in cases {

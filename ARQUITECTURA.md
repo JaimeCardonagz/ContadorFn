@@ -182,6 +182,13 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Cambios tras la cuarta prueba (2026-11-12)
+
+- **Sin cajas de munición**: se eliminan por completo (tipo, plantillas, opción y pantalla). Los datos antiguos de munición se ignoran.
+- **El contador de partida vuelve a cero al terminar la partida** (antes seguía mostrando la última hasta empezar otra, y parecía que la partida no terminaba).
+- **El contador sobre el juego es configurable**: número de partida (no mostrar / del día / total), cofres totales (sí / no) y cofres de la partida (no mostrar / sumados / por tipo). Configuración enseña una vista previa con el mismo componente que usa el contador.
+- **Cañón dorado**: en la prueba real no contó. El recuadro "ENCENDER MECHA" sigue al cañón por la pantalla y la zona de búsqueda era pequeña; ahora se busca en el 60 % central de la pantalla (con una tabla de sumas para que sea rápido) y el registro anota cuándo ve el recuadro y cuánto avanza el anillo. La causa es una hipótesis: no hay datos de esa prueba.
+
 ### Tercera prueba real: el multiplicador "X2" (2026-11-12)
 
 - Al abrir varios contenedores **iguales seguidos**, el juego no muestra un aviso nuevo: cambia la etiqueta a **"COFRE RARO X2"**, "X3"… (visto también en "CAJA DE MUNICIÓN X2"). Ese texto no se reconocía, y por eso se perdían cofres raros, que suelen estar juntos.

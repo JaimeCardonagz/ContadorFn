@@ -142,7 +142,6 @@ fn debug_simulate(app: AppHandle, event: String) -> Result<Stats, String> {
         "normal" => chest(ChestType::Normal),
         "rare" => chest(ChestType::Rare),
         "spirit" => chest(ChestType::Spirit),
-        "ammo" => chest(ChestType::Ammo),
         "match_start" => update(&app, |t, now| t.match_started(now)),
         "eliminated" => update(&app, |t, now| t.match_ended(now, EndReason::Eliminated)),
         "victory" => update(&app, |t, now| t.match_ended(now, EndReason::Victory)),

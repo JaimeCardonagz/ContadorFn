@@ -10,8 +10,6 @@ pub enum ChestType {
     Normal,
     Rare,
     Spirit,
-    /// Caja de munición: se cuenta aparte, no suma al total de cofres.
-    Ammo,
 }
 
 impl ChestType {
@@ -20,7 +18,6 @@ impl ChestType {
             ChestType::Normal => "normal",
             ChestType::Rare => "rare",
             ChestType::Spirit => "spirit",
-            ChestType::Ammo => "ammo",
         }
     }
 }
@@ -49,9 +46,7 @@ pub struct Counts {
     pub normal: u32,
     pub rare: u32,
     pub spirit: u32,
-    /// Cajas de munición: se cuentan aparte.
-    pub ammo: u32,
-    /// Total de cofres (tesoro + raro + espíritu); no incluye la munición.
+    /// Total de cofres: tesoro + raro + espíritus.
     pub total: u32,
 }
 
@@ -256,10 +251,7 @@ impl Store {
                 Some("normal") => counts.normal = n,
                 Some("rare") => counts.rare = n,
                 Some("spirit") => counts.spirit = n,
-                Some("ammo") => {
-                    counts.ammo = n;
-                    continue; // la munición no es un cofre: no suma al total
-                }
+                Some("ammo") => continue, // datos antiguos: la munición ya no se cuenta
                 _ => {} // sin clasificar o tipo de otra versión: solo suma al total
             }
             counts.total += n;

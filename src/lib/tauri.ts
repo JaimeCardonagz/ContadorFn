@@ -5,11 +5,10 @@ import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tau
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-const counts = (normal: number, rare: number, spirit: number, ammo: number) => ({
+const counts = (normal: number, rare: number, spirit: number) => ({
   normal,
   rare,
   spirit,
-  ammo,
   total: normal + rare + spirit,
 });
 
@@ -18,9 +17,9 @@ const sample: Record<string, unknown> = {
     inMatch: true,
     sessionActive: true,
     sessionStartedAt: Date.now() - 4_530_000,
-    matchCounts: counts(9, 2, 1, 3),
-    sessionCounts: counts(58, 7, 4, 15),
-    totalCounts: counts(4821, 366, 87, 412),
+    matchCounts: counts(9, 2, 1),
+    sessionCounts: counts(58, 7, 4),
+    totalCounts: counts(4821, 366, 87),
     sessionMatches: 6,
     totalMatches: 412,
   },
@@ -32,7 +31,9 @@ const sample: Record<string, unknown> = {
     showOverlay: true,
     corner: "top-left",
     setupDone: new URLSearchParams(location.search).get("inicio") === null,
-    countAmmo: true,
+    overlayMatch: "total",
+    overlayTotal: true,
+    overlayChests: "types",
   },
   get_diag: {
     supported: true,

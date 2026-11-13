@@ -1,23 +1,27 @@
 //! Cañón dorado: suelta botín como un cofre, pero no muestra el aviso de
-//! experiencia. Se reconoce por su recuadro "ENCENDER MECHA" junto a la mira:
-//! si mientras se ve avanza el anillo de progreso (aparecen píxeles blancos
-//! alrededor del icono de la tecla) y después el recuadro desaparece, se
-//! encendió. Cuenta como cofre de tesoro (decisión del usuario, 2026-11-12).
+//! experiencia. Se reconoce por su recuadro "ENCENDER MECHA": si mientras se
+//! ve avanza el anillo de progreso (aparecen píxeles blancos alrededor del
+//! icono de la tecla) y después el recuadro desaparece, se encendió. Cuenta
+//! como cofre de tesoro (decisión del usuario, 2026-11-12).
+//!
+//! El recuadro no está en un sitio fijo: sigue al cañón en pantalla. Por eso
+//! se busca en una zona grande, con una tabla de sumas para descartar rápido
+//! casi todas las posiciones.
 
 use crate::capture::Frame;
 use crate::notice::Mask;
 use crate::notice_templates::FUSE_PROMPT;
 use image::imageops::{self, FilterType};
 
-/// Zona donde aparece el recuadro, en fracciones de la pantalla.
-pub const ROI: (f32, f32, f32, f32) = (0.50, 0.40, 0.72, 0.58);
+/// Zona donde puede aparecer el recuadro, en fracciones de la pantalla.
+pub const ROI: (f32, f32, f32, f32) = (0.25, 0.20, 0.85, 0.80);
 /// Alto de esa zona a 768 px de alto de pantalla.
-const CANON_H: u32 = 138;
+const CANON_H: u32 = 461;
 /// Coincidencia mínima (intersección / unión) del texto con la plantilla.
-const MIN_IOU: f32 = 0.7;
+const MIN_IOU: f32 = 0.6;
 /// Píxeles blancos que añade el anillo, como mínimo, para darlo por avanzado
 /// (completo añade unos 320).
-const RING_DELTA: u32 = 120;
+pub const RING_DELTA: u32 = 120;
 /// Lecturas seguidas sin el recuadro para darlo por desaparecido.
 const GONE_FRAMES: u32 = 2;
 
@@ -29,27 +33,63 @@ pub fn roi_rect(width: u32, height: u32) -> (u32, u32, u32, u32) {
     (x0, y0, x1 - x0, y1 - y0)
 }
 
+/// Tabla de sumas de una máscara: cuántos píxeles hay en cualquier rectángulo.
+struct Sums {
+    w: usize,
+    h: usize,
+    table: Vec<u32>,
+}
+
+impl Sums {
+    fn new(mask: &Mask) -> Self {
+        let (w, h) = (mask.w, mask.h);
+        let mut table = vec![0u32; (w + 1) * (h + 1)];
+        for y in 0..h {
+            let mut row = 0;
+            for x in 0..w {
+                row += u32::from(mask.bits[y * w + x]);
+                table[(y + 1) * (w + 1) + x + 1] = table[y * (w + 1) + x + 1] + row;
+            }
+        }
+        Self { w, h, table }
+    }
+
+    /// Píxeles en el rectángulo [x0, x1) × [y0, y1), recortado a la máscara.
+    fn count(&self, x0: isize, y0: isize, x1: isize, y1: isize) -> u32 {
+        let cx = |v: isize| v.clamp(0, self.w as isize) as usize;
+        let cy = |v: isize| v.clamp(0, self.h as isize) as usize;
+        let (x0, x1, y0, y1) = (cx(x0), cx(x1), cy(y0), cy(y1));
+        if x1 <= x0 || y1 <= y0 {
+            return 0;
+        }
+        let at = |x: usize, y: usize| self.table[y * (self.w + 1) + x];
+        at(x1, y1) + at(x0, y0) - at(x1, y0) - at(x0, y1)
+    }
+}
+
 /// Si el recuadro "ENCENDER MECHA" está en `roi`, devuelve cuántos píxeles
 /// blancos hay alrededor del icono de la tecla (crece al avanzar el anillo).
 pub fn read(roi: &Frame) -> Option<u32> {
     let mask = white_text(roi)?;
+    let sums = Sums::new(&mask);
     let template = Mask::from_ascii(FUSE_PROMPT);
     let (tw, th) = (template.w as isize, template.h as isize);
-    for line in mask.lines() {
-        if line.y1 - line.y0 < template.h - 2 {
-            continue;
-        }
-        for y0 in line.y0 as isize - 1..=line.y1 as isize - th + 1 {
-            for x0 in line.x0 as isize..=line.x1 as isize - tw {
-                if iou(&mask, &template, x0, y0) >= MIN_IOU {
-                    let mut ring = 0;
-                    for y in y0 - 16..y0 + th + 16 {
-                        for x in x0 - 75..x0 - 5 {
-                            ring += u32::from(mask.get(x, y));
-                        }
-                    }
-                    return Some(ring);
-                }
+    let wanted = template.bits.iter().filter(|&&b| b).count() as u32;
+    for y0 in 0..=mask.h as isize - th {
+        for x0 in 0..=mask.w as isize - tw {
+            // Descarte rápido: cantidad de texto parecida a la de la plantilla
+            // y sin más texto pegado justo encima ni debajo.
+            let inside = sums.count(x0, y0, x0 + tw, y0 + th);
+            if inside * 10 < wanted * 7 || inside * 10 > wanted * 14 {
+                continue;
+            }
+            if sums.count(x0, y0 - 3, x0 + tw, y0 - 1) * 10 > wanted
+                || sums.count(x0, y0 + th + 1, x0 + tw, y0 + th + 3) * 10 > wanted
+            {
+                continue;
+            }
+            if iou(&mask, &template, x0, y0) >= MIN_IOU {
+                return Some(sums.count(x0 - 75, y0 - 16, x0 - 5, y0 + th + 16));
             }
         }
     }
@@ -121,7 +161,7 @@ fn white_text(roi: &Frame) -> Option<Mask> {
     Some(Mask { w, h, bits })
 }
 
-/// Convierte lecturas sucesivas del recuadro en "se encendió un cañón".
+/// Sigue el recuadro del cañón a lo largo de lecturas sucesivas.
 #[derive(Default)]
 pub struct FuseCounter {
     visible: bool,
@@ -131,8 +171,14 @@ pub struct FuseCounter {
 }
 
 impl FuseCounter {
-    /// Devuelve `true` cuando hay que contar un cañón.
-    pub fn step(&mut self, reading: Option<u32>) -> bool {
+    /// ¿Está el recuadro a la vista ahora mismo?
+    pub fn visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Cuando el recuadro desaparece devuelve cuánto creció el anillo mientras
+    /// estuvo a la vista; a partir de `RING_DELTA` el cañón se encendió.
+    pub fn step(&mut self, reading: Option<u32>) -> Option<u32> {
         match reading {
             Some(ring) => {
                 if !self.visible {
@@ -141,16 +187,16 @@ impl FuseCounter {
                 self.min = self.min.min(ring);
                 self.max = self.max.max(ring);
                 self.gone = 0;
-                false
+                None
             }
-            None if !self.visible => false,
+            None if !self.visible => None,
             None => {
                 self.gone += 1;
                 if self.gone < GONE_FRAMES {
-                    return false;
+                    return None;
                 }
                 self.visible = false;
-                self.max - self.min >= RING_DELTA
+                Some(self.max - self.min)
             }
         }
     }
@@ -165,7 +211,7 @@ mod tests {
         readings
             .iter()
             .flat_map(|&(r, n)| std::iter::repeat_n(r, n))
-            .filter(|&r| counter.step(r))
+            .filter(|&r| counter.step(r).is_some_and(|grown| grown >= RING_DELTA))
             .count()
     }
 
@@ -219,7 +265,11 @@ mod tests {
                     height: image.height(),
                     rgb: image.into_raw(),
                 };
-                counted += usize::from(counter.step(read(&roi)));
+                counted += usize::from(
+                    counter
+                        .step(read(&roi))
+                        .is_some_and(|grown| grown >= RING_DELTA),
+                );
             }
             assert_eq!(counted, expected, "{dir}");
         }

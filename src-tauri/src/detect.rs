@@ -1,14 +1,14 @@
 //! Máquina de estados de apertura de contenedores (ARQUITECTURA.md §6).
 //!
 //! Es lógica pura: recibe una `Observation` por frame analizado y decide si se
-//! abrió un cofre o una caja de munición. No sabe de dónde salen las señales.
+//! abrió un cofre. No sabe de dónde salen las señales.
 //!
 //! Así funciona en el juego (medido en los vídeos de `Debug/`, 2026-11-11):
 //! al apuntar aparece el recuadro "BUSCAR" junto a la mira; un **toque** de la
 //! tecla arranca un anillo de progreso alrededor de la tecla que se completa
 //! solo en ~0,7 s y **no se puede cancelar**; el recuadro desaparece ~0,25 s
 //! después y enseguida sale, en un sitio fijo, el aviso de experiencia cuya
-//! última línea dice qué se abrió: "COFRE", "COFRE RARO", "CAJA DE MUNICIÓN".
+//! última línea dice qué se abrió: "COFRE", "COFRE RARO", "COFRE DE ESPÍRITUS".
 //! Ese aviso confirma la apertura y a la vez da el tipo.
 
 use crate::store::ChestType;
@@ -254,7 +254,7 @@ fn opened(chest: ChestType, signals: u8) -> ChestOpened {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ChestType::{Ammo, Normal, Rare, Spirit};
+    use ChestType::{Normal, Rare, Spirit};
 
     /// Guion de frames a 30 fps con los tiempos medidos en el juego.
     struct Sim {
@@ -374,10 +374,10 @@ mod tests {
     #[test]
     fn el_tipo_lo_da_el_texto_del_aviso() {
         let mut s = Sim::new();
-        for kind in [Normal, Rare, Spirit, Ammo] {
+        for kind in [Normal, Rare, Spirit] {
             s.open(kind);
         }
-        assert_eq!(s.kinds(), [Normal, Rare, Spirit, Ammo]);
+        assert_eq!(s.kinds(), [Normal, Rare, Spirit]);
         assert_eq!(s.rejected, []);
     }
 
@@ -515,25 +515,25 @@ mod tests {
 
     #[test]
     fn con_el_aviso_anterior_aun_visible_se_espera_al_nuevo_para_el_tipo() {
-        // Caja de munición y, enseguida, un cofre raro: mientras se abre el
-        // cofre sigue en pantalla "CAJA DE MUNICIÓN".
+        // Un cofre de tesoro y, enseguida, uno raro: mientras se abre el
+        // cofre sigue en pantalla "COFRE".
         let mut s = Sim::new();
         s.tap_and_ring(None);
         s.frames(10, NOTHING);
-        s.frames(20, notice(Ammo));
+        s.frames(20, notice(Normal));
 
         s.frames(
             5,
             Observation {
-                notice: Some(Ammo),
+                notice: Some(Normal),
                 ..PROMPT
             },
         );
-        s.tap_and_ring(Some(Ammo));
-        s.frames(8, notice(Ammo)); // el aviso viejo todavía no ha cambiado
+        s.tap_and_ring(Some(Normal));
+        s.frames(8, notice(Normal)); // el aviso viejo todavía no ha cambiado
         s.frames(30, notice(Rare));
 
-        assert_eq!(s.kinds(), [Ammo, Rare]);
+        assert_eq!(s.kinds(), [Normal, Rare]);
         assert_eq!(s.rejected, []);
     }
 

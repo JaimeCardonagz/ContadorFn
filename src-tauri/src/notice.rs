@@ -2,7 +2,7 @@
 //!
 //! Al abrir un contenedor aparece, en una zona fija del HUD, una cantidad
 //! ("+600 PE") y debajo una o varias líneas; la última dice qué se abrió:
-//! "COFRE", "COFRE RARO", "COFRE DE ESPÍRITUS", "CAJA DE MUNICIÓN". Este
+//! "COFRE", "COFRE RARO", "COFRE DE ESPÍRITUS". Este
 //! módulo localiza esas líneas y compara la última con plantillas, así que
 //! confirma la apertura y da el tipo a la vez.
 //!
@@ -578,7 +578,7 @@ mod tests {
     }
 
     /// Comprueba todas las imágenes de una carpeta. El nombre dice qué debe
-    /// leerse: `normal_`, `rare_`, `spirit_`, `ammo_`, `none_`; o
+    /// leerse: `normal_`, `rare_`, `spirit_`, `none_`; o
     /// `trans-<tipo>_` para un aviso a medio aparecer o desaparecer, donde
     /// vale no leer nada pero no leer otro tipo. Devuelve cuántas comprobó.
     fn check_images(dir: &Path, read: fn(&Frame) -> Reading) -> usize {
@@ -609,7 +609,6 @@ mod tests {
                 "normal" => Some(ChestType::Normal),
                 "rare" => Some(ChestType::Rare),
                 "spirit" => Some(ChestType::Spirit),
-                "ammo" => Some(ChestType::Ammo),
                 "none" => None,
                 other => panic!("prefijo desconocido: {other}"),
             };
@@ -668,8 +667,8 @@ mod tests {
         }
     }
 
-    /// "COFRE RARO X2" y "CAJA DE MUNICIÓN X2" reales: se reconoce el tipo y
-    /// se separa el multiplicador, que es el mismo dibujo en los dos.
+    /// "COFRE RARO X2" real: se reconoce el tipo y se separa el multiplicador.
+    /// "CAJA DE MUNICIÓN X2" ya no se cuenta.
     #[test]
     fn avisos_con_multiplicador() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/reales");
@@ -684,7 +683,7 @@ mod tests {
         let (Some(base), Some(rare), Some(ammo)) = (
             load("rare_p3_base.png"),
             load("rare_p3_x2.png"),
-            load("ammo_p3_x2.png"),
+            load("none_p3_municion_x2.png"),
         ) else {
             eprintln!("sin recortes con multiplicador: prueba omitida");
             return;
@@ -692,9 +691,8 @@ mod tests {
         assert_eq!(base.reading, Reading::Known(ChestType::Rare));
         assert!(base.suffix.is_none(), "sin multiplicador no hay sufijo");
         assert_eq!(rare.reading, Reading::Known(ChestType::Rare));
-        assert_eq!(ammo.reading, Reading::Known(ChestType::Ammo));
-        let (rare, ammo) = (rare.suffix.unwrap(), ammo.suffix.unwrap());
-        assert!(rare.similarity(&ammo) >= 0.6, "{}", rare.similarity(&ammo));
+        assert!(rare.suffix.is_some());
+        assert_eq!(ammo.reading.kind(), None);
     }
 
     /// Recortes guardados por la app en el equipo de pruebas (GeForce Now,
