@@ -41,6 +41,8 @@ pub struct Outcome {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagState {
+    /// El modo diagnóstico está activo (no lo está para el público).
+    pub enabled: bool,
     /// La captura y el teclado solo están implementados en Windows.
     pub supported: bool,
     pub dir: String,
@@ -77,6 +79,8 @@ pub struct Diag {
     burst_at: AtomicI64,
     last_shot_request: AtomicI64,
     last_burst_request: AtomicI64,
+    /// Modo diagnóstico: registro, capturas y recortes. Apagado para el público.
+    enabled: bool,
     binding: Mutex<Binding>,
     require_input: AtomicBool,
     show_overlay: AtomicBool,
@@ -86,13 +90,14 @@ pub struct Diag {
 }
 
 impl Diag {
-    pub fn new(dir: PathBuf, settings: &Settings) -> Arc<Self> {
+    pub fn new(dir: PathBuf, settings: &Settings, enabled: bool) -> Arc<Self> {
         // El registro no crece sin límite: al pasar de 1 MB se empieza de nuevo.
         let log = dir.join("diagnostico.log");
-        if fs::metadata(&log).is_ok_and(|meta| meta.len() > 1_000_000) {
+        if enabled && fs::metadata(&log).is_ok_and(|meta| meta.len() > 1_000_000) {
             let _ = fs::remove_file(&log);
         }
         let state = DiagState {
+            enabled,
             supported: cfg!(windows),
             dir: dir.display().to_string(),
             ..Default::default()
@@ -104,6 +109,7 @@ impl Diag {
             burst_at: AtomicI64::new(0),
             last_shot_request: AtomicI64::new(0),
             last_burst_request: AtomicI64::new(0),
+            enabled,
             binding: Mutex::new(settings.binding.clone()),
             require_input: AtomicBool::new(settings.require_input),
             show_overlay: AtomicBool::new(settings.show_overlay),
@@ -120,8 +126,12 @@ impl Diag {
         self.save_samples.store(settings.save_samples, SeqCst);
     }
 
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     pub fn save_samples(&self) -> bool {
-        self.save_samples.load(SeqCst)
+        self.enabled && self.save_samples.load(SeqCst)
     }
 
     pub fn show_overlay(&self) -> bool {
@@ -152,11 +162,17 @@ impl Diag {
     }
 
     pub fn request_shot(&self, delay_ms: i64) {
+        if !self.enabled {
+            return;
+        }
         request(&self.last_shot_request, &self.shot_at, delay_ms);
     }
 
     /// Empieza una ráfaga tras `delay_ms`, o detiene ya la que esté en curso.
     pub fn request_burst(&self, delay_ms: i64) {
+        if !self.enabled {
+            return;
+        }
         let delay_ms = if self.lock().recording { 0 } else { delay_ms };
         request(&self.last_burst_request, &self.burst_at, delay_ms);
     }
@@ -178,6 +194,9 @@ impl Diag {
 
     /// Añade una línea a `diagnostico.log`, junto a las capturas.
     pub fn log(&self, message: &str) {
+        if !self.enabled {
+            return;
+        }
         let secs = now_ms() / 1000;
         let (h, m, s) = (secs / 3600 % 24, secs / 60 % 60, secs % 60);
         if let Ok(mut file) = OpenOptions::new()
@@ -255,8 +274,8 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 .clone();
             let keys = [
                 input::binding_down(&binding),
-                input::vk_down(VK_F8),
-                input::vk_down(VK_F9),
+                diag.enabled && input::vk_down(VK_F8),
+                diag.enabled && input::vk_down(VK_F9),
             ];
             if keys[0] && !previous[0] {
                 diag.last_press.store(now_ms(), SeqCst);

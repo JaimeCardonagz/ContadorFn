@@ -1,53 +1,122 @@
 //! Detección de partida: ¿está en pantalla el HUD de juego?
 //!
-//! La señal es la barra de vida, abajo a la izquierda. Medido en los vídeos
+//! La señal es la barra de vida (y su icono "+"), abajo a la izquierda. Medido en los vídeos
 //! del usuario: aparece en la isla inicial, se oculta unos segundos durante el
 //! autobús, vuelve al saltar y desaparece al ser eliminado o volver al lobby.
 //! En la pantalla de eliminación hay otra barra verde (la del rival), pero en
 //! otro sitio.
 
 use crate::capture::Frame;
+use image::imageops::{self, FilterType};
 
-/// Parte izquierda de la barra de vida a 768 px de alto: x0, y0, x1, y1. El
-/// HUD está anclado al borde izquierdo y escala con la altura de la pantalla.
-/// Está llena siempre que queda algo más del 15 % de vida.
-const BAR: (u32, u32, u32, u32) = (54, 702, 100, 720);
+/// Zona del HUD que se mira, a 768 px de alto: x0, y0, x1, y1. Contiene el
+/// icono "+" de la vida y el arranque de la barra. El HUD está anclado al
+/// borde izquierdo y escala con la altura de la pantalla.
+const ZONE: (u32, u32, u32, u32) = (22, 698, 102, 724);
+const ZONE_W: usize = (ZONE.2 - ZONE.0) as usize;
+const ZONE_H: usize = (ZONE.3 - ZONE.1) as usize;
+/// Dentro de la zona: trozo de barra que está lleno con algo más del 15 % de vida.
+const BAR: (usize, usize, usize, usize) = (32, 4, 78, 22);
 /// Fracción mínima de píxeles verdes para dar la barra por visible.
 const MIN_GREEN: f32 = 0.6;
+/// Dentro de la zona: dónde puede estar el icono "+" (varía unos píxeles
+/// según el ancho de la pantalla).
+const ICON_SEARCH: (usize, usize, usize, usize) = (0, 0, 30, ZONE_H);
+/// El icono "+": blanco, 10×11 px, con brazos de 4 y 3 px de grosor.
+const PLUS: [&str; 11] = [
+    "...####...",
+    "...####...",
+    "...####...",
+    "...####...",
+    "##########",
+    "##########",
+    "##########",
+    "...####...",
+    "...####...",
+    "...####...",
+    "...####...",
+];
 
-/// Lecturas seguidas con la barra visible para dar por empezada una partida.
+/// Lecturas seguidas con el HUD visible para dar por empezada una partida.
 const START_SAMPLES: u32 = 3;
-/// Durante los primeros minutos la barra se oculta en el autobús: se tolera
-/// más tiempo sin verla antes de dar la partida por terminada.
+/// Durante los primeros minutos el HUD se oculta en el autobús: se tolera
+/// más tiempo sin verlo antes de dar la partida por terminada.
 const EARLY_PHASE_MS: i64 = 180_000;
 const EARLY_GRACE_MS: i64 = 60_000;
-/// Después, sin barra durante este tiempo la partida ha terminado. Abrir el
-/// mapa o el inventario la oculta solo unos segundos.
+/// Después, sin HUD durante este tiempo la partida ha terminado (eliminado o
+/// de vuelta en el lobby). Abrir el mapa o el inventario lo oculta solo unos
+/// segundos.
 const GRACE_MS: i64 = 25_000;
 
-/// Rectángulo de la barra en una pantalla de `height` píxeles de alto:
+/// Rectángulo de la zona del HUD en una pantalla de `height` píxeles de alto:
 /// (x, y, ancho, alto).
-pub fn bar_rect(height: u32) -> (u32, u32, u32, u32) {
+pub fn zone_rect(height: u32) -> (u32, u32, u32, u32) {
     let scale = |v: u32| v * height / 768;
-    let (x0, y0, x1, y1) = (scale(BAR.0), scale(BAR.1), scale(BAR.2), scale(BAR.3));
+    let (x0, y0, x1, y1) = (scale(ZONE.0), scale(ZONE.1), scale(ZONE.2), scale(ZONE.3));
     (x0, y0, (x1 - x0).max(1), (y1 - y0).max(1))
 }
 
-/// ¿Es `zone` (un recorte de `bar_rect`) la barra de vida?
-pub fn health_bar_visible(zone: &Frame) -> bool {
-    let pixels = zone.rgb.as_chunks::<3>().0;
-    if pixels.is_empty() {
+/// ¿Se ve el HUD de partida en `zone` (un recorte de `zone_rect`)? Vale la
+/// barra de vida o su icono "+": con muy poca vida la barra casi no se ve,
+/// pero el icono sigue ahí mientras se está en partida.
+pub fn hud_visible(zone: &Frame) -> bool {
+    let Some(rgb) = canonical(zone) else {
         return false;
+    };
+    let pixel = |x: usize, y: usize| {
+        let i = (y * ZONE_W + x) * 3;
+        [rgb[i] as i16, rgb[i + 1] as i16, rgb[i + 2] as i16]
+    };
+    let mut green = 0;
+    for y in BAR.1..BAR.3 {
+        for x in BAR.0..BAR.2 {
+            let [r, g, b] = pixel(x, y);
+            // En i16: con u8 saturado, el blanco puro pasaría por verde.
+            green += usize::from(g >= 150 && g - r >= 40 && g - b >= 70);
+        }
     }
-    let green = pixels.iter().filter(|&&rgb| is_bar_green(rgb)).count();
-    green as f32 / pixels.len() as f32 >= MIN_GREEN
+    let bar_area = (BAR.2 - BAR.0) * (BAR.3 - BAR.1);
+    if green as f32 / bar_area as f32 >= MIN_GREEN {
+        return true;
+    }
+    let white = |x: usize, y: usize| pixel(x, y).iter().all(|&c| c >= 190);
+    let (width, height) = (PLUS[0].len(), PLUS.len());
+    for top in ICON_SEARCH.1..=ICON_SEARCH.3 - height {
+        for left in ICON_SEARCH.0..=ICON_SEARCH.2 - width {
+            let (mut on, mut on_hit, mut off, mut off_hit) = (0, 0, 0, 0);
+            for (y, row) in PLUS.iter().enumerate() {
+                for (x, cell) in row.bytes().enumerate() {
+                    let lit = white(left + x, top + y);
+                    if cell == b'#' {
+                        on += 1;
+                        on_hit += usize::from(lit);
+                    } else {
+                        off += 1;
+                        off_hit += usize::from(lit);
+                    }
+                }
+            }
+            // Casi todo el "+" encendido y casi nada de sus esquinas.
+            if on_hit * 100 >= on * 85 && off_hit * 100 <= off * 20 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
-/// Verde de la barra de vida: del verde puro al verde amarillento.
-fn is_bar_green([r, g, b]: [u8; 3]) -> bool {
-    // En i16: con u8 saturado, el blanco puro pasaría por verde.
-    let (r, g, b) = (r as i16, g as i16, b as i16);
-    g >= 150 && g - r >= 40 && g - b >= 70
+/// El recorte como RGB de `ZONE_W`×`ZONE_H` (reescalado si la pantalla no
+/// mide 768 px de alto).
+fn canonical(zone: &Frame) -> Option<Vec<u8>> {
+    let (w, h) = (zone.width as usize, zone.height as usize);
+    if zone.rgb.len() != w * h * 3 || w == 0 || h == 0 {
+        return None;
+    }
+    if (w, h) == (ZONE_W, ZONE_H) {
+        return Some(zone.rgb.clone());
+    }
+    let image = image::RgbImage::from_raw(zone.width, zone.height, zone.rgb.clone())?;
+    Some(imageops::resize(&image, ZONE_W as u32, ZONE_H as u32, FilterType::Triangle).into_raw())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,47 +278,112 @@ mod tests {
         );
     }
 
+    /// Zona del HUD de un solo color.
     fn zone(color: [u8; 3]) -> Frame {
-        let (_, _, width, height) = bar_rect(768);
         Frame {
-            width,
-            height,
-            rgb: color.repeat((width * height) as usize),
+            width: ZONE_W as u32,
+            height: ZONE_H as u32,
+            rgb: color.repeat(ZONE_W * ZONE_H),
+        }
+    }
+
+    fn paint(frame: &mut Frame, x0: usize, y0: usize, x1: usize, y1: usize, color: [u8; 3]) {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let i = (y * frame.width as usize + x) * 3;
+                frame.rgb[i..i + 3].copy_from_slice(&color);
+            }
+        }
+    }
+
+    /// HUD sobre un fondo: el icono "+" y la barra llena hasta `filled`.
+    fn hud(background: [u8; 3], filled: usize) -> Frame {
+        let mut frame = zone(background);
+        paint(&mut frame, 28, 4, 78, 22, [40, 40, 50]); // pista vacía de la barra
+        paint(&mut frame, 28, 4, 28 + filled, 22, [70, 205, 60]);
+        for (y, row) in PLUS.iter().enumerate() {
+            for (x, cell) in row.bytes().enumerate() {
+                if cell == b'#' {
+                    paint(&mut frame, 13 + x, 8 + y, 14 + x, 9 + y, [235, 235, 235]);
+                }
+            }
+        }
+        frame
+    }
+
+    #[test]
+    fn con_vida_el_hud_se_ve() {
+        assert!(hud_visible(&hud([60, 90, 140], 50)));
+        assert!(
+            hud_visible(&zone([160, 230, 40])),
+            "barra verde amarillenta"
+        );
+    }
+
+    #[test]
+    fn con_muy_poca_vida_el_hud_se_sigue_viendo_por_el_icono() {
+        // La barra está casi vacía: lo que queda es el "+".
+        for filled in [0, 2, 5] {
+            assert!(hud_visible(&hud([60, 90, 140], filled)), "vida {filled}");
         }
     }
 
     #[test]
-    fn la_barra_es_verde_y_otros_colores_no_cuentan() {
-        assert!(
-            health_bar_visible(&zone([60, 200, 60])),
-            "verde del lado izquierdo"
-        );
-        assert!(
-            health_bar_visible(&zone([160, 230, 40])),
-            "verde amarillento"
-        );
-        for other in [
+    fn sin_hud_no_se_ve_nada() {
+        for color in [
             [30, 30, 40],
             [255, 255, 255],
             [40, 160, 230],
             [200, 60, 50],
-            [90, 120, 80],
+            [235, 235, 235],
         ] {
-            assert!(!health_bar_visible(&zone(other)), "{other:?}");
+            assert!(!hud_visible(&zone(color)), "{color:?}");
         }
     }
 
     #[test]
-    fn la_zona_de_la_barra_escala_con_la_altura() {
-        assert_eq!(bar_rect(768), (54, 702, 46, 18));
-        assert_eq!(bar_rect(1080), (75, 987, 65, 25));
+    fn la_zona_escala_con_la_altura() {
+        assert_eq!(zone_rect(768), (22, 698, 80, 26));
+        assert_eq!(zone_rect(1080), (30, 981, 113, 37));
+        // Una pantalla más grande se lee igual tras reescalar.
+        let small = hud([60, 90, 140], 3);
+        let image = image::RgbImage::from_raw(small.width, small.height, small.rgb).unwrap();
+        let (_, _, w, h) = zone_rect(1440);
+        let big = imageops::resize(&image, w, h, FilterType::CatmullRom);
+        assert!(hud_visible(&Frame {
+            width: w,
+            height: h,
+            rgb: big.into_raw(),
+        }));
+    }
+
+    /// Recortes reales de la zona del HUD (locales): `si_*` en partida, `no_*`
+    /// en el lobby, en la pantalla de eliminación y tras la partida.
+    #[test]
+    fn recortes_reales() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/reales/hud");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            eprintln!("sin recortes del HUD: prueba omitida");
+            return;
+        };
+        for entry in entries {
+            let path = entry.unwrap().path();
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            let image = image::open(&path).unwrap().into_rgb8();
+            let visible = hud_visible(&Frame {
+                width: image.width(),
+                height: image.height(),
+                rgb: image.into_raw(),
+            });
+            assert_eq!(visible, name.starts_with("si_"), "{name}");
+        }
     }
 
     /// Recortes de la barra a 1 fps de los vídeos del usuario (locales; ver
     /// tools/extraer_avisos.sh). "Cofres Prueba" va del lobby a la eliminación.
     #[test]
     fn videos_completos() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/barra-1fps");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/hud-1fps");
         let Ok(entries) = std::fs::read_dir(root.join("cofres-prueba")) else {
             eprintln!("sin recortes de la barra: prueba omitida");
             return;
@@ -260,7 +394,7 @@ mod tests {
             .iter()
             .map(|path| {
                 let image = image::open(path).unwrap().into_rgb8();
-                health_bar_visible(&Frame {
+                hud_visible(&Frame {
                     width: image.width(),
                     height: image.height(),
                     rgb: image.into_raw(),

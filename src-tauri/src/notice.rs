@@ -123,13 +123,26 @@ pub struct Read {
 }
 
 /// Rectángulo de la zona del aviso en una pantalla de `width`×`height`:
-/// (x, y, ancho, alto) en píxeles.
+/// (x, y, ancho, alto) en píxeles. El aviso se coloca respecto al centro de la
+/// pantalla y su tamaño depende de la altura, así que la zona se calcula así
+/// y vale para cualquier proporción (16:9, 16:10, ultrapanorámica).
 pub fn roi_rect(width: u32, height: u32) -> (u32, u32, u32, u32) {
-    let x0 = (ROI.0 * width as f32) as u32;
-    let y0 = (ROI.1 * height as f32) as u32;
-    let x1 = (ROI.2 * width as f32) as u32;
-    let y1 = (ROI.3 * height as f32) as u32;
-    (x0, y0, x1 - x0, y1 - y0)
+    centered_rect(width, height, ROI)
+}
+
+/// Convierte una zona dada en fracciones de una pantalla 16:9 al rectángulo
+/// equivalente en otra pantalla, midiendo desde el centro en alturas.
+pub(crate) fn centered_rect(
+    width: u32,
+    height: u32,
+    zone: (f32, f32, f32, f32),
+) -> (u32, u32, u32, u32) {
+    const ASPECT: f32 = 16.0 / 9.0;
+    let (w, h) = (width as f32, height as f32);
+    let x = |fraction: f32| (w / 2.0 + (fraction - 0.5) * ASPECT * h).clamp(0.0, w) as u32;
+    let (x0, x1) = (x(zone.0), x(zone.2));
+    let (y0, y1) = ((zone.1 * h) as u32, (zone.3 * h) as u32);
+    (x0, y0, (x1 - x0).max(1), (y1 - y0).max(1))
 }
 
 /// Lee el aviso en una captura de la pantalla completa.

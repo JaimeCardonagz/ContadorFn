@@ -26,11 +26,7 @@ pub const RING_DELTA: u32 = 120;
 const GONE_FRAMES: u32 = 2;
 
 pub fn roi_rect(width: u32, height: u32) -> (u32, u32, u32, u32) {
-    let x0 = (ROI.0 * width as f32) as u32;
-    let y0 = (ROI.1 * height as f32) as u32;
-    let x1 = (ROI.2 * width as f32) as u32;
-    let y1 = (ROI.3 * height as f32) as u32;
-    (x0, y0, x1 - x0, y1 - y0)
+    crate::notice::centered_rect(width, height, ROI)
 }
 
 /// Si el recuadro "ENCENDER MECHA" está en `roi`, devuelve cuántos píxeles

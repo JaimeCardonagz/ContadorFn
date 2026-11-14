@@ -29,3 +29,6 @@ Debug/
 
 # Carpeta de capturas traída del PC de pruebas (local, no se sube)
 Imagenes/
+
+# Configuración local de herramientas
+.claude/

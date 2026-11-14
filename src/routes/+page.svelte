@@ -18,6 +18,7 @@
   };
 
   type Diag = {
+    enabled: boolean;
     supported: boolean;
     dir: string;
     inputDown: boolean;
@@ -210,7 +211,7 @@
     </form>
   {:else}
   <div class="tabs">
-    {#each ["counter", "stats", "settings", "diag"] as const as name}
+    {#each (["counter", "stats", "settings", "diag"] as const).filter((name) => name !== "diag" || diag?.enabled) as name}
       <button class:actual={tab === name} onclick={() => (tab = name)}>{t.tabs[name]}</button>
     {/each}
   </div>

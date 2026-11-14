@@ -182,6 +182,19 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Versión 1.0.1 (2026-11-13)
+
+- **Fin de partida con poca vida**: el HUD de partida se reconoce por la barra de vida **o por su icono "+"**, que sigue en pantalla aunque la barra esté casi vacía. La partida solo termina cuando el HUD desaparece: eliminado o de vuelta en el lobby.
+- **Cualquier resolución y proporción**: las zonas de lectura se calculan desde el centro de la pantalla en unidades de altura (no como fracción del ancho) y lo capturado se reescala a 768 px de alto. Comprobado con capturas reales solo a 1360×768; el resto, por reescalado.
+- **Diagnóstico fuera de la versión pública**: la pestaña, el registro, las capturas, los recortes y los atajos F8/F9 solo existen arrancando con `--diagnostico` (o en compilaciones de desarrollo). El público no guarda nada en disco aparte de sus estadísticas.
+
+### Plan de la versión 1.1 (decidido por el usuario, 2026-11-13)
+
+- **Aviso de versión nueva.**
+- **Historial de partidas de las últimas 24 horas** como máximo (la más antigua que se conserve no puede tener más de 24 h). De cada partida solo se guarda la **duración** y los **cofres abiertos**.
+- **Versión para Linux.**
+- **Sin gráficos de historial, en ninguna versión.**
+
 ### Versión 1.0.0 (2026-11-13)
 
 - Primera versión oficial para Windows, publicada como *Release* en GitHub.

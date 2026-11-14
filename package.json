@@ -1,6 +1,6 @@
 {
   "name": "fortnite-chest-counter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Contador de cofres para Fortnite (analiza la pantalla, no lee ni modifica el juego)",
   "type": "module",
   "scripts": {

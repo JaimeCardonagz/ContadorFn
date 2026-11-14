@@ -40,6 +40,7 @@ const sample: Record<string, unknown> = {
     overlayOpacity: 100,
   },
   get_diag: {
+    enabled: new URLSearchParams(location.search).get("diagnostico") !== null,
     supported: true,
     dir: "C:\\Users\\jugador\\Pictures\\FortniteChestCounter",
     inputDown: false,

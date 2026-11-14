@@ -343,16 +343,22 @@ pub fn run() {
             apply_overlay(app.handle(), &settings);
             app.manage(AppState(Mutex::new(tracker)));
 
-            // Diagnóstico: capturas en Imágenes/FortniteChestCounter.
+            // Modo diagnóstico (registro, capturas, recortes y atajos F8/F9):
+            // solo en compilaciones de desarrollo o arrancando con
+            // `--diagnostico`. El público no lo tiene y no se le guarda nada.
+            let diagnostics =
+                cfg!(debug_assertions) || std::env::args().any(|arg| arg == "--diagnostico");
             let captures = app
                 .path()
                 .picture_dir()
                 .unwrap_or(dir)
                 .join("FortniteChestCounter");
-            std::fs::create_dir_all(&captures)?;
-            let diag = Diag::new(captures, &settings);
+            if diagnostics {
+                std::fs::create_dir_all(&captures)?;
+            }
+            let diag = Diag::new(captures, &settings, diagnostics);
             app.manage(diag.clone());
-            if let Err(error) = register_hotkeys(app.handle(), &diag) {
+            if diagnostics && let Err(error) = register_hotkeys(app.handle(), &diag) {
                 diag.set_hotkey_error(error);
             }
             if let Err(error) = build_tray(app.handle()) {

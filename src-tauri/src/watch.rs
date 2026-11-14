@@ -170,7 +170,7 @@ impl NoticeCounter {
 
 fn grab_health_bar() -> Result<Frame, String> {
     let (_, height) = capture::screen_size()?;
-    let (x, y, w, h) = scene::bar_rect(height);
+    let (x, y, w, h) = scene::zone_rect(height);
     capture::grab_rect(x, y, w, h)
 }
 
@@ -185,7 +185,9 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
         // Recortes del aviso de cada detección y de avisos desconocidos: sirven
         // para comprobar aciertos y crear plantillas. Solo si el usuario lo activa.
         let samples = diag.dir().join("avisos");
-        let _ = std::fs::create_dir_all(&samples);
+        if diag.enabled() {
+            let _ = std::fs::create_dir_all(&samples);
+        }
         let save = |roi: &Frame, name: String| {
             if !diag.save_samples() {
                 return;
@@ -232,7 +234,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
             if turn.is_multiple_of(SCENE_EVERY)
                 && let Ok(zone) = grab_health_bar()
             {
-                let visible = scene::health_bar_visible(&zone);
+                let visible = scene::hud_visible(&zone);
                 diag.set_hud_visible(visible);
                 let change = match matches.step(now_ms(), visible) {
                     Some(MatchEvent::Started) => {
