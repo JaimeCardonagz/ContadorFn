@@ -1,6 +1,6 @@
 [package]
 name = "fortnite-chest-counter"
-version = "1.1.0"
+version = "1.1.1"
 description = "Contador de cofres para Fortnite"
 authors = ["JaimeCardonagz"]
 license = "MIT"

@@ -188,6 +188,10 @@ Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla s
 - **Cualquier resolución y proporción**: las zonas de lectura se calculan desde el centro de la pantalla en unidades de altura (no como fracción del ancho) y lo capturado se reescala a 768 px de alto. Comprobado con capturas reales solo a 1360×768; el resto, por reescalado.
 - **Diagnóstico fuera de la versión pública**: la pestaña, el registro, las capturas, los recortes y los atajos F8/F9 solo existen arrancando con `--diagnostico` (o en compilaciones de desarrollo). El público no guarda nada en disco aparte de sus estadísticas.
 
+### Versión 1.1.1 (2026-11-14)
+
+- Las carpetas de datos se llaman como la app (`FortniteChestCounter`) en vez de con el identificador interno. Las ventanas se crean en código para poder fijar también la carpeta de caché de WebView2. La base de datos de versiones anteriores se mueve sola.
+
 ### Versión 1.1.0 (2026-11-14)
 
 - **Aviso de versión nueva**: al arrancar, el panel consulta la última versión publicada en la API de GitHub; si es posterior, muestra un aviso con **Descargar** (abre siempre la misma página de descargas, fija en el código) y una **×**. Se puede desactivar en Configuración → Avanzado ("Buscar versiones nuevas"). Es la única conexión a internet del programa.
@@ -363,7 +367,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- versión de esquema, e
 ```
 
 - Modo **WAL** y escrituras por evento (unas pocas por minuto): impacto en disco inapreciable.
-- La base (`chests.db`) se guarda en la carpeta de datos que Tauri asigna al identificador de la app (`%APPDATA%\io.github.jaimecardonagz.fortnitechestcounter\` / `~/.local/share/io.github.jaimecardonagz.fortnitechestcounter/`), no junto al ejecutable.
+- La base (`chests.db`) se guarda en `%APPDATA%\FortniteChestCounter\` (Linux: `~/.local/share/FortniteChestCounter/`) y la caché de la ventana en `%LOCALAPPDATA%\FortniteChestCounter\`, no junto al ejecutable. Desde la 1.1.1; al arrancar, la base de la carpeta antigua (con el identificador interno `io.github.…`) se mueve aquí y la carpeta antigua se borra.
 - **Ajuste manual**: el histórico se puede corregir a mano (cofres abiertos antes de instalar la app, o correcciones), por tipo. Se guarda como ajuste aparte, no como eventos falsos, y ningún tipo puede quedar por debajo de cero. No afecta a la partida ni a la sesión.
 - **Contador de partidas**: se muestran las partidas de la sesión activa y las de siempre. Cuenta toda partida registrada, también las forzadas a mano y las interrumpidas. El total histórico de partidas admite el mismo ajuste manual que los cofres.
 - **Cierre inesperado**: al arrancar, las partidas que quedaron abiertas se cierran como `interrupted` con la hora de su último cofre. La sesión abierta se reanuda si su última actividad está dentro del periodo de inactividad; si no, se cierra en esa última actividad.

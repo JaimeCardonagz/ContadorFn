@@ -8,6 +8,7 @@ mod fuse;
 mod input;
 mod notice;
 mod notice_templates;
+mod paths;
 mod scene;
 mod settings;
 mod store;
@@ -351,12 +352,52 @@ fn set_hotkeys(app: &AppHandle, diag: &Diag, on: bool) {
     }
 }
 
+/// Crea el panel y el contador. Se hace aquí y no en tauri.conf.json para
+/// poder elegir la carpeta de caché de la ventana (si no, lleva el
+/// identificador interno de la app).
+fn create_windows(app: &AppHandle, webview_dir: &std::path::Path) -> tauri::Result<()> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::App("/".into()))
+        .title("Fortnite Chest Counter")
+        .inner_size(440.0, 620.0)
+        .min_inner_size(320.0, 360.0)
+        .data_directory(webview_dir.to_path_buf())
+        .build()?;
+    WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("/overlay".into()))
+        .title("Fortnite Chest Counter - contador")
+        .inner_size(250.0, 104.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .focused(false)
+        .visible(false)
+        .data_directory(webview_dir.to_path_buf())
+        .build()?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
+            // Carpetas con el nombre de la app; la base de datos de versiones
+            // anteriores (carpeta con el identificador interno) se trae aquí.
+            let dir = app.path().data_dir()?.join(paths::APP_DIR);
+            let webview_dir = app.path().local_data_dir()?.join(paths::APP_DIR);
+            if let Ok(old) = app.path().app_data_dir()
+                && let Ok(true) = paths::migrate_database(&old, &dir)
+                && let Ok(old_local) = app.path().app_local_data_dir()
+                && old_local != webview_dir
+            {
+                // Caché de la ventana de la versión anterior: ya no se usa.
+                let _ = std::fs::remove_dir_all(old_local);
+            }
             std::fs::create_dir_all(&dir)?;
+            create_windows(app.handle(), &webview_dir)?;
             let store = Store::open(&dir.join("chests.db"))?;
             let tracker = Tracker::new(store, now_ms(), DEFAULT_INACTIVITY_MS)?;
             let settings = tracker.settings()?;
