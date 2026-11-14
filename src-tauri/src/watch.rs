@@ -185,13 +185,11 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
         // Recortes del aviso de cada detección y de avisos desconocidos: sirven
         // para comprobar aciertos y crear plantillas. Solo si el usuario lo activa.
         let samples = diag.dir().join("avisos");
-        if diag.enabled() {
-            let _ = std::fs::create_dir_all(&samples);
-        }
         let save = |roi: &Frame, name: String| {
             if !diag.save_samples() {
                 return;
             }
+            let _ = std::fs::create_dir_all(&samples);
             let _ = image::save_buffer(
                 samples.join(name),
                 &roi.rgb,

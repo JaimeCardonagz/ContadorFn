@@ -13,6 +13,8 @@ Funciona tanto con **GeForce NOW** como con el **launcher directo de Fortnite**.
 - Detecta sola cuándo empieza y termina cada partida.
 - Muestra un **contador pequeño, solo texto y sin fondo**, en la esquina que elijas. Tú decides qué enseña, con o sin colores, su tamaño y su opacidad.
 - El contador solo aparece con el juego delante; el resto del tiempo el programa queda en la bandeja del sistema, junto al reloj.
+- **Historial** de las partidas de las últimas 24 horas: duración y cofres de cada una.
+- Te avisa cuando hay una versión nueva.
 
 ## Requisitos
 
@@ -38,11 +40,12 @@ Después abre el juego: el contador aparecerá en la esquina y el panel se irá 
 |---|---|
 | Contador | Cofres de la partida, del día y del total |
 | Estadísticas | Total de cada tipo, partidas jugadas y promedio por partida |
-| Configuración | Idioma, contador sobre el juego, botón con el que abres los cofres y reinicio de estadísticas |
+| Historial | Partidas de las últimas 24 horas: duración y cofres |
+| Configuración | Idioma, contador sobre el juego, botón con el que abres los cofres, opciones avanzadas y reinicio de estadísticas |
 
 ## Privacidad
 
-Todo se queda en tu equipo. El programa no modifica el juego, no envía nada a internet y no tiene cuentas ni telemetría.
+Todo se queda en tu equipo. El programa no modifica el juego y no tiene cuentas ni telemetría. Su única conexión a internet es para comprobar si hay una versión nueva, y se puede desactivar en Configuración → Avanzado.
 
 ## Desarrollo
 

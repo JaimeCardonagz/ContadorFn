@@ -2,6 +2,7 @@
 // durante el desarrollo) devuelve datos de ejemplo para poder ver el diseño.
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -30,6 +31,8 @@ const sample: Record<string, unknown> = {
     hideFromCapture: true,
     showOverlay: true,
     saveSamples: false,
+    diagnostics: new URLSearchParams(location.search).get("diagnostico") !== null,
+    checkUpdates: true,
     corner: "top-left",
     setupDone: new URLSearchParams(location.search).get("inicio") === null,
     overlayMatch: "total",
@@ -59,6 +62,12 @@ const sample: Record<string, unknown> = {
     hudVisible: true,
   },
   is_debug: false,
+  get_history: [
+    { id: 6, durationMs: 1_114_000, counts: counts(9, 2, 1) },
+    { id: 5, durationMs: 742_000, counts: counts(5, 0, 1) },
+    { id: 4, durationMs: 96_000, counts: counts(0, 0, 0) },
+    { id: 3, durationMs: 1_385_000, counts: counts(14, 3, 0) },
+  ],
 };
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -69,4 +78,9 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
 export function listen<T>(event: string, handler: EventCallback<T>): Promise<UnlistenFn> {
   if (inTauri) return tauriListen<T>(event, handler);
   return Promise.resolve(() => {});
+}
+
+/** Versión de la app (en el navegador, una de ejemplo antigua para ver el aviso). */
+export function appVersion(): Promise<string> {
+  return inTauri ? getVersion() : Promise.resolve("1.0.0");
 }

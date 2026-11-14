@@ -169,6 +169,7 @@ fn set_settings(
         .map_err(|e| e.to_string())?;
     settings::set_language(&settings.language);
     diag.apply(&settings);
+    set_hotkeys(&app, &diag, settings.diagnostics);
     hide_from_capture(&app, settings.hide_from_capture);
     apply_overlay(&app, &settings);
     let _ = app.emit("settings-changed", &settings);
@@ -293,40 +294,61 @@ fn diag_burst(diag: State<Arc<Diag>>) {
     diag.request_burst(BUTTON_DELAY_MS);
 }
 
-#[tauri::command]
-fn open_captures_dir(diag: State<Arc<Diag>>) -> Result<(), String> {
+/// Página de descargas del proyecto.
+const RELEASES_URL: &str = "https://github.com/JaimeCardonagz/ContadorFn/releases/latest";
+
+/// Abre una carpeta o una dirección web con el programa del sistema.
+fn open_external(target: &std::ffi::OsStr) -> Result<(), String> {
     let opener = if cfg!(windows) {
         "explorer"
     } else {
         "xdg-open"
     };
     std::process::Command::new(opener)
-        .arg(diag.dir())
+        .arg(target)
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
-/// Registra F8 y F9 como atajos globales del sistema. Es una vía distinta de
-/// la consulta del teclado: el diagnóstico muestra cuál de las dos funciona.
-fn register_hotkeys(app: &AppHandle, diag: &Arc<Diag>) -> Result<(), String> {
-    let handler = diag.clone();
-    app.plugin(
-        tauri_plugin_global_shortcut::Builder::new()
-            .with_handler(move |_app, shortcut, event| {
-                if event.state() == ShortcutState::Pressed {
-                    handler.hotkey(shortcut.key == Code::F9);
-                }
-            })
-            .build(),
-    )
-    .map_err(|e| e.to_string())?;
+#[tauri::command]
+fn open_captures_dir(diag: State<Arc<Diag>>) -> Result<(), String> {
+    open_external(diag.dir().as_os_str())
+}
+
+/// Abre la página de descargas (siempre la misma dirección, fija aquí).
+#[tauri::command]
+fn open_releases() -> Result<(), String> {
+    open_external(RELEASES_URL.as_ref())
+}
+
+#[tauri::command]
+fn get_history(state: State<AppState>) -> Result<Vec<store::MatchSummary>, String> {
+    let tracker = state.0.lock().map_err(|e| e.to_string())?;
+    tracker.history(now_ms()).map_err(|e| e.to_string())
+}
+
+/// Activa o desactiva F8 y F9 como atajos globales del sistema. Solo con el
+/// modo diagnóstico: así no se le quitan esas teclas a otros programas.
+fn set_hotkeys(app: &AppHandle, diag: &Diag, on: bool) {
+    let shortcuts = app.global_shortcut();
     for key in [Code::F8, Code::F9] {
-        app.global_shortcut()
-            .register(Shortcut::new(None, key))
-            .map_err(|e| e.to_string())?;
+        let shortcut = Shortcut::new(None, key);
+        let result = if on {
+            if shortcuts.is_registered(shortcut) {
+                Ok(())
+            } else {
+                shortcuts.register(shortcut)
+            }
+        } else if shortcuts.is_registered(shortcut) {
+            shortcuts.unregister(shortcut)
+        } else {
+            Ok(())
+        };
+        if let Err(error) = result {
+            diag.set_hotkey_error(error.to_string());
+        }
     }
-    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -344,22 +366,30 @@ pub fn run() {
             app.manage(AppState(Mutex::new(tracker)));
 
             // Modo diagnóstico (registro, capturas, recortes y atajos F8/F9):
-            // solo en compilaciones de desarrollo o arrancando con
-            // `--diagnostico`. El público no lo tiene y no se le guarda nada.
-            let diagnostics =
-                cfg!(debug_assertions) || std::env::args().any(|arg| arg == "--diagnostico");
+            // apagado salvo que el usuario lo active en Configuración.
             let captures = app
                 .path()
                 .picture_dir()
                 .unwrap_or(dir)
                 .join("FortniteChestCounter");
-            if diagnostics {
+            if settings.diagnostics {
                 std::fs::create_dir_all(&captures)?;
             }
-            let diag = Diag::new(captures, &settings, diagnostics);
+            let diag = Diag::new(captures, &settings);
             app.manage(diag.clone());
-            if diagnostics && let Err(error) = register_hotkeys(app.handle(), &diag) {
-                diag.set_hotkey_error(error);
+            let handler = diag.clone();
+            // Si los atajos globales no están disponibles, el programa sigue sin ellos.
+            match app.handle().plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(move |_app, shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            handler.hotkey(shortcut.key == Code::F9);
+                        }
+                    })
+                    .build(),
+            ) {
+                Ok(()) => set_hotkeys(app.handle(), &diag, settings.diagnostics),
+                Err(error) => diag.set_hotkey_error(error.to_string()),
             }
             if let Err(error) = build_tray(app.handle()) {
                 diag.log(&format!("sin icono en la bandeja: {error}"));
@@ -409,6 +439,8 @@ pub fn run() {
             diag_shot,
             diag_burst,
             open_captures_dir,
+            open_releases,
+            get_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

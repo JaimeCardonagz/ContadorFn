@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { invoke, listen } from "$lib/tauri";
+  import { appVersion, invoke, listen } from "$lib/tauri";
+  import { isNewer, latestVersion } from "$lib/updates";
   import { onMount } from "svelte";
   import { texts, type Lang } from "$lib/i18n";
   import OverlayText from "$lib/OverlayText.svelte";
@@ -50,6 +51,8 @@
     corner: string;
     setupDone: boolean;
     saveSamples: boolean;
+    diagnostics: boolean;
+    checkUpdates: boolean;
     overlayMatch: string;
     overlayTotal: boolean;
     overlayChests: string;
@@ -65,7 +68,27 @@
   let debug = $state(false);
   let error = $state("");
   let now = $state(Date.now());
-  let tab = $state<"counter" | "stats" | "settings" | "diag">("counter");
+  type Tab = "counter" | "stats" | "history" | "settings" | "diag";
+  let tab = $state<Tab>("counter");
+
+  // Historial de las últimas 24 h: solo duración y cofres de cada partida.
+  type Summary = { id: number; durationMs: number; counts: Counts };
+  let history = $state<Summary[] | null>(null);
+  const loadHistory = () =>
+    invoke<Summary[]>("get_history")
+      .then((value) => (history = value))
+      .catch((e) => (error = String(e)));
+  $effect(() => {
+    if (tab === "history") loadHistory();
+  });
+
+  // Sin modo diagnóstico no hay pestaña Diagnóstico.
+  $effect(() => {
+    if (tab === "diag" && settings && !settings.diagnostics) tab = "counter";
+  });
+
+  // Aviso de versión nueva.
+  let update = $state<string | null>(null);
 
   // Idioma de la interfaz: el guardado o, la primera vez, el del sistema.
   const lang = $derived<Lang>(
@@ -106,9 +129,17 @@
       // La primera vez se guarda el idioma del sistema, para que el backend
       // genere sus mensajes en el mismo idioma que la interfaz.
       if (!value.language) save({ language: lang });
+      if (value.checkUpdates) {
+        Promise.all([latestVersion(), appVersion()]).then(([latest, current]) => {
+          if (latest && isNewer(latest, current)) update = latest;
+        });
+      }
     });
     const listeners = [
-      listen<Stats>("stats-changed", (event) => (stats = event.payload)),
+      listen<Stats>("stats-changed", (event) => {
+        stats = event.payload;
+        if (tab === "history") loadHistory();
+      }),
       listen<Diag>("diag-state", (event) => (diag = event.payload)),
       listen<string>("diag-thumbnail", (event) => (thumbnail = event.payload)),
     ];
@@ -118,6 +149,16 @@
       clearInterval(timer);
     };
   });
+
+  /** Duración legible: "23 min 05 s", o "1 h 02 min" si pasa de una hora. */
+  function clock(ms: number) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const h = Math.floor(s / 3600);
+    const m = Math.floor(s / 60) % 60;
+    if (h > 0) return `${h} h ${pad(m)} min`;
+    return m > 0 ? `${m} min ${pad(s % 60)} s` : `${s} s`;
+  }
 
   function elapsed(since: number | null) {
     if (since === null) return "";
@@ -210,8 +251,20 @@
       </nav>
     </form>
   {:else}
+  {#if update}
+    <div class="aviso" role="status">
+      <span>{t.updateAvailable(update)}</span>
+      <span class="botones">
+        <button class="principal" onclick={() => invoke("open_releases").catch((e) => (error = String(e)))}>
+          {t.download}
+        </button>
+        <button class="cerrar" aria-label={t.close} onclick={() => (update = null)}>×</button>
+      </span>
+    </div>
+  {/if}
+
   <div class="tabs">
-    {#each (["counter", "stats", "settings", "diag"] as const).filter((name) => name !== "diag" || diag?.enabled) as name}
+    {#each (["counter", "stats", "history", "settings", "diag"] as const).filter((name) => name !== "diag" || settings?.diagnostics) as name}
       <button class:actual={tab === name} onclick={() => (tab = name)}>{t.tabs[name]}</button>
     {/each}
   </div>
@@ -271,6 +324,32 @@
       </tbody>
     </table>
     <div class="fila"><span>{t.matchesPlayed}</span><strong>{games}</strong></div>
+  {/if}
+
+  {#if tab === "history"}
+    <section>
+      <div class="fila">
+        <span>{t.historyTitle}</span>
+        {#if history?.length}
+          <small>{t.historySummary(history.length, history.reduce((sum, m) => sum + m.counts.total, 0))}</small>
+        {/if}
+      </div>
+    </section>
+    {#if history && history.length === 0}
+      <p class="vacio">{t.historyEmpty}</p>
+    {:else if history}
+      <ul class="historial">
+        {#each history as match (match.id)}
+          <li>
+            <div class="cabecera">
+              <span class="duracion" title={t.duration}>{clock(match.durationMs)}</span>
+              <strong>{match.counts.total}</strong>
+            </div>
+            {@render chips(match.counts)}
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 
   {#if tab === "settings" && settings}
@@ -395,6 +474,26 @@
           type="checkbox"
           checked={settings.requireInput}
           onchange={(e) => save({ requireInput: e.currentTarget.checked })}
+        />
+      </label>
+    </section>
+
+    <section>
+      <div class="fila"><span>{t.advanced}</span></div>
+      <label class="opcion">
+        <span>{t.checkUpdates}<Help text={t.help.checkUpdates} /></span>
+        <input
+          type="checkbox"
+          checked={settings.checkUpdates}
+          onchange={(e) => save({ checkUpdates: e.currentTarget.checked })}
+        />
+      </label>
+      <label class="opcion">
+        <span>{t.diagnosticsToggle}<Help text={t.help.diagnostics} /></span>
+        <input
+          type="checkbox"
+          checked={settings.diagnostics}
+          onchange={(e) => save({ diagnostics: e.currentTarget.checked })}
         />
       </label>
     </section>
@@ -799,6 +898,75 @@
     align-items: center;
     gap: 12px;
     font-size: 14px;
+  }
+
+  /* Aviso de versión nueva: se queda hasta que se cierra, porque lleva una acción. */
+  .aviso {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--primary);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--primary) 22%, var(--card));
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  button.principal {
+    background: var(--primary);
+    border-color: var(--primary);
+    font-weight: 600;
+  }
+
+  button.cerrar {
+    min-width: 36px;
+    padding: 0 10px;
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .historial {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .historial li {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+
+  .cabecera {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .duracion {
+    font-size: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+
+  .historial strong {
+    font-size: 24px;
+  }
+
+  .vacio {
+    margin: 4px 0;
+    color: var(--text-muted);
+    font-size: 14px;
+    text-align: center;
   }
 
   table {

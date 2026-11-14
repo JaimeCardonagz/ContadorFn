@@ -40,6 +40,10 @@ pub struct Settings {
     pub hide_from_capture: bool,
     /// Mostrar el contador sobre el juego; si no, la app queda en segundo plano.
     pub show_overlay: bool,
+    /// Modo diagnóstico: pestaña, registro, capturas y atajos F8/F9.
+    pub diagnostics: bool,
+    /// Comprobar al arrancar si hay una versión nueva en GitHub.
+    pub check_updates: bool,
     /// Guardar un recorte de cada aviso leído, para depurar fallos.
     pub save_samples: bool,
     /// Esquina del contador: "top-left", "top-right", "bottom-left" o "bottom-right".
@@ -69,6 +73,8 @@ impl Default for Settings {
             require_input: false,
             hide_from_capture: true,
             show_overlay: true,
+            diagnostics: false,
+            check_updates: true,
             save_samples: false,
             corner: "top-left".into(),
             setup_done: false,
@@ -134,6 +140,8 @@ mod tests {
                 require_input: true,
                 hide_from_capture: false,
                 show_overlay: false,
+                diagnostics: true,
+                check_updates: false,
                 save_samples: true,
                 corner: "bottom-right".into(),
                 setup_done: true,

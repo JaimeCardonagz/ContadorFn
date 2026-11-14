@@ -3,12 +3,14 @@
 //! Todas las funciones reciben `now` (epoch ms) para poder probarse sin reloj.
 
 use crate::settings::Settings;
-use crate::store::{ChestType, Counts, EndReason, Scope, Store};
+use crate::store::{ChestType, Counts, EndReason, MatchSummary, Scope, Store};
 use rusqlite::Result;
 use serde::Serialize;
 
 /// Sin partidas durante este tiempo, la sesión se cierra sola.
 pub const DEFAULT_INACTIVITY_MS: i64 = 60 * 60 * 1000;
+/// El historial enseña las partidas de las últimas 24 horas.
+pub const HISTORY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,6 +139,11 @@ impl Tracker {
     /// Devuelve `false` si dejaría el contador de ese tipo en negativo.
     pub fn adjust_total(&mut self, now: i64, chest: ChestType, delta: i64) -> Result<bool> {
         self.store.adjust_total(now, chest, delta)
+    }
+
+    /// Partidas terminadas de las últimas 24 horas, la más reciente primero.
+    pub fn history(&self, now: i64) -> Result<Vec<MatchSummary>> {
+        self.store.recent_matches(now - HISTORY_WINDOW_MS)
     }
 
     pub fn settings(&self) -> Result<Settings> {
@@ -503,5 +510,60 @@ mod tests {
         // Y sobrevive a un reinicio.
         let t = Tracker::new(t.into_store(), 7_000, HOUR).unwrap();
         assert_eq!(t.stats().unwrap().total_counts.total, 326);
+    }
+
+    #[test]
+    fn el_historial_ensena_solo_las_partidas_terminadas_de_las_ultimas_24_horas() {
+        let mut t = tracker();
+        // Una partida de hace 30 horas: fuera del historial.
+        t.match_started(0).unwrap();
+        chest(&mut t, 60_000, ChestType::Normal);
+        t.match_ended(10 * MIN, EndReason::Eliminated).unwrap();
+        // Dos partidas recientes.
+        let base = 30 * HOUR;
+        t.match_started(base).unwrap();
+        chest(&mut t, base + MIN, ChestType::Normal);
+        chest(&mut t, base + 2 * MIN, ChestType::Rare);
+        t.match_ended(base + 12 * MIN, EndReason::Eliminated)
+            .unwrap();
+        t.match_started(base + 20 * MIN).unwrap();
+        chest(&mut t, base + 21 * MIN, ChestType::Spirit);
+        t.match_ended(base + 38 * MIN, EndReason::Lobby).unwrap();
+        // Una en curso: tampoco sale.
+        t.match_started(base + 40 * MIN).unwrap();
+        chest(&mut t, base + 41 * MIN, ChestType::Normal);
+
+        let history = t.history(base + 45 * MIN).unwrap();
+        let rows: Vec<_> = history
+            .iter()
+            .map(|m| {
+                (
+                    m.duration_ms / MIN,
+                    m.counts.normal,
+                    m.counts.rare,
+                    m.counts.spirit,
+                    m.counts.total,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [(18, 0, 0, 1, 1), (12, 1, 1, 0, 2)],
+            "la más reciente primero"
+        );
+    }
+
+    #[test]
+    fn una_partida_sin_cofres_sale_con_cero() {
+        let mut t = tracker();
+        t.match_started(1_000).unwrap();
+        t.match_ended(1_000 + 5 * MIN, EndReason::Eliminated)
+            .unwrap();
+        let history = t.history(10 * MIN).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(
+            (history[0].duration_ms, history[0].counts.total),
+            (5 * MIN, 0)
+        );
     }
 }

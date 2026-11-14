@@ -50,6 +50,16 @@ pub struct Counts {
     pub total: u32,
 }
 
+/// Una partida terminada, para el historial: solo duración y cofres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchSummary {
+    /// Identificador interno, solo para que la interfaz distinga las filas.
+    pub id: i64,
+    pub duration_ms: i64,
+    pub counts: Counts,
+}
+
 /// Qué eventos sumar.
 #[derive(Debug, Clone, Copy)]
 pub enum Scope {
@@ -304,6 +314,35 @@ impl Store {
             params![now, matches.max(0)],
         )?;
         Ok(())
+    }
+
+    /// Partidas terminadas que empezaron desde `since`, la más reciente primero.
+    pub fn recent_matches(&self, since: i64) -> Result<Vec<MatchSummary>> {
+        self.conn
+            .prepare_cached(
+                "SELECT m.id, m.ended_at - m.started_at,
+                        COALESCE(SUM(e.chest_type = 'normal'), 0),
+                        COALESCE(SUM(e.chest_type = 'rare'), 0),
+                        COALESCE(SUM(e.chest_type = 'spirit'), 0)
+                 FROM matches m LEFT JOIN chest_events e ON e.match_id = m.id
+                 WHERE m.ended_at IS NOT NULL AND m.started_at >= ?1
+                 GROUP BY m.id
+                 ORDER BY m.started_at DESC, m.id DESC",
+            )?
+            .query_map(params![since], |r| {
+                let (normal, rare, spirit): (u32, u32, u32) = (r.get(2)?, r.get(3)?, r.get(4)?);
+                Ok(MatchSummary {
+                    id: r.get(0)?,
+                    duration_ms: r.get::<_, i64>(1)?.max(0),
+                    counts: Counts {
+                        normal,
+                        rare,
+                        spirit,
+                        total: normal + rare + spirit,
+                    },
+                })
+            })?
+            .collect()
     }
 
     pub fn matches_in_session(&self, session_id: i64) -> Result<u32> {

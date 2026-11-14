@@ -188,12 +188,13 @@ Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla s
 - **Cualquier resolución y proporción**: las zonas de lectura se calculan desde el centro de la pantalla en unidades de altura (no como fracción del ancho) y lo capturado se reescala a 768 px de alto. Comprobado con capturas reales solo a 1360×768; el resto, por reescalado.
 - **Diagnóstico fuera de la versión pública**: la pestaña, el registro, las capturas, los recortes y los atajos F8/F9 solo existen arrancando con `--diagnostico` (o en compilaciones de desarrollo). El público no guarda nada en disco aparte de sus estadísticas.
 
-### Plan de la versión 1.1 (decidido por el usuario, 2026-11-13)
+### Versión 1.1.0 (2026-11-14)
 
-- **Aviso de versión nueva.**
-- **Historial de partidas de las últimas 24 horas** como máximo (la más antigua que se conserve no puede tener más de 24 h). De cada partida solo se guarda la **duración** y los **cofres abiertos**.
-- **Versión para Linux.**
-- **Sin gráficos de historial, en ninguna versión.**
+- **Aviso de versión nueva**: al arrancar, el panel consulta la última versión publicada en la API de GitHub; si es posterior, muestra un aviso con **Descargar** (abre siempre la misma página de descargas, fija en el código) y una **×**. Se puede desactivar en Configuración → Avanzado ("Buscar versiones nuevas"). Es la única conexión a internet del programa.
+- **Historial de partidas**: pestaña nueva con las partidas **terminadas** que empezaron en las **últimas 24 horas**, la más reciente primero. De cada una solo se muestra la **duración** y los **cofres** (total y por tipo). No se borra nada de la base de datos: las partidas antiguas siguen contando en los totales; solo dejan de mostrarse.
+- **"Habilitar manejo de diagnósticos"** (Configuración → Avanzado, apagado por defecto): muestra la pestaña Diagnóstico y enciende registro, capturas, recortes y los atajos F8/F9, que solo se registran mientras está activo. Sustituye al parámetro `--diagnostico`.
+- **Sin gráficos de historial, en ninguna versión** (decisión del usuario).
+- **Linux**: pospuesto a una versión posterior.
 
 ### Versión 1.0.0 (2026-11-13)
 
