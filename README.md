@@ -14,7 +14,7 @@ Funciona tanto con **GeForce NOW** como con el **launcher directo de Fortnite**.
 - Muestra un **contador pequeño, solo texto y sin fondo**, en la esquina que elijas. Tú decides qué enseña, con o sin colores, su tamaño y su opacidad.
 - El contador solo aparece con el juego delante; el resto del tiempo el programa queda en la bandeja del sistema, junto al reloj.
 - **Historial** de las partidas de las últimas 24 horas: duración y cofres de cada una.
-- Te avisa cuando hay una versión nueva.
+- Te avisa cuando hay una versión nueva y se actualiza solo al pulsar **Actualizar**.
 
 ## Requisitos
 

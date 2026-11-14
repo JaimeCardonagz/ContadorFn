@@ -13,6 +13,7 @@ mod scene;
 mod settings;
 mod store;
 mod tracker;
+mod updater;
 mod watch;
 
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,8 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutSt
 use tracker::{DEFAULT_INACTIVITY_MS, Stats, Tracker};
 
 struct AppState(Mutex<Tracker>);
+/// Versión nueva encontrada por `check_update`: la única que se puede instalar.
+struct UpdateState(Mutex<Option<updater::Version>>);
 
 pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
@@ -323,6 +326,65 @@ fn open_releases() -> Result<(), String> {
     open_external(RELEASES_URL.as_ref())
 }
 
+/// Busca una versión nueva (si el usuario no lo ha desactivado).
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
+    let enabled = {
+        let state = app.state::<AppState>();
+        let tracker = state.0.lock().map_err(|e| e.to_string())?;
+        tracker.settings().map_err(|e| e.to_string())?.check_updates
+    };
+    if !enabled {
+        return Ok(None);
+    }
+    let found = tauri::async_runtime::spawn_blocking(updater::newer_version)
+        .await
+        .map_err(|e| e.to_string())??;
+    *app.state::<UpdateState>()
+        .0
+        .lock()
+        .map_err(|e| e.to_string())? = found;
+    Ok(found.map(|v| v.to_string()))
+}
+
+/// Descarga, verifica e instala la versión que encontró `check_update`, y
+/// reinicia el programa. La interfaz no puede pedir otra versión ni otro archivo.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    let version = app
+        .state::<UpdateState>()
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| {
+            tr(
+                "No hay ninguna versión nueva comprobada.",
+                "No new version has been checked.",
+            )
+            .to_string()
+        })?;
+    if !cfg!(windows) {
+        return Err(tr(
+            "La actualización automática solo está disponible en Windows.",
+            "Automatic updates are only available on Windows.",
+        )
+        .into());
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let target = exe.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = updater::download_verified(version)?;
+        updater::install_at(&target, &bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    std::process::Command::new(&exe)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 fn get_history(state: State<AppState>) -> Result<Vec<store::MatchSummary>, String> {
     let tracker = state.0.lock().map_err(|e| e.to_string())?;
@@ -384,6 +446,11 @@ fn create_windows(app: &AppHandle, webview_dir: &std::path::Path) -> tauri::Resu
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            // Restos de una actualización anterior.
+            if let Ok(exe) = std::env::current_exe() {
+                updater::cleanup(&exe);
+            }
+            app.manage(UpdateState(Mutex::new(None)));
             // Carpetas con el nombre de la app; la base de datos de versiones
             // anteriores (carpeta con el identificador interno) se trae aquí.
             let dir = app.path().data_dir()?.join(paths::APP_DIR);
@@ -481,6 +548,8 @@ pub fn run() {
             diag_burst,
             open_captures_dir,
             open_releases,
+            check_update,
+            install_update,
             get_history,
         ])
         .run(tauri::generate_context!())

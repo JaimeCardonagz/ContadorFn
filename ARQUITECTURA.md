@@ -188,6 +188,19 @@ Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla s
 - **Cualquier resolución y proporción**: las zonas de lectura se calculan desde el centro de la pantalla en unidades de altura (no como fracción del ancho) y lo capturado se reescala a 768 px de alto. Comprobado con capturas reales solo a 1360×768; el resto, por reescalado.
 - **Diagnóstico fuera de la versión pública**: la pestaña, el registro, las capturas, los recortes y los atajos F8/F9 solo existen arrancando con `--diagnostico` (o en compilaciones de desarrollo). El público no guarda nada en disco aparte de sus estadísticas.
 
+### Versión 1.1.2 (2026-11-14)
+
+- **Actualización automática**: el aviso de versión nueva tiene un botón **Actualizar** que descarga la versión, la verifica, sustituye el `.exe` y reinicia el programa. Si no puede (sin conexión, carpeta protegida, firma inválida), ofrece **Descargar** como antes.
+- Seguridad (`src-tauri/src/updater.rs`):
+  - Cada versión se firma en GitHub Actions con una clave Ed25519 (`tools/firmar.py`); la privada solo existe como secreto `UPDATE_SIGNING_KEY` del repositorio y en una copia local del propietario, fuera del proyecto. La app lleva la pública.
+  - Se firma un manifiesto que une versión y SHA-256 del archivo: no vale un archivo alterado, ni uno firmado para otra versión, ni una versión que no sea posterior a la instalada.
+  - Solo direcciones fijas de GitHub, solo HTTPS (también en redirecciones), TLS del sistema, tamaño máximo y tiempos de espera. La versión anunciada se valida como `N.N.N` antes de usarla.
+  - La interfaz no elige qué instalar: solo puede pedir instalar la versión que el propio backend encontró. Ninguna orden acepta rutas ni direcciones.
+  - Política de seguridad de contenido estricta en las ventanas: solo código propio, sin conexiones externas desde la interfaz (la comprobación de versión se hace en Rust).
+  - El programa no abre puertos ni escucha conexiones.
+- Versión instalada visible al pie de Configuración.
+- Para publicar: el *Release* debe llevar `FortniteChestCounter.exe` **y** `FortniteChestCounter.exe.sig` (ambos salen del artefacto de *Build Windows*).
+
 ### Versión 1.1.1 (2026-11-14)
 
 - Las carpetas de datos se llaman como la app (`FortniteChestCounter`) en vez de con el identificador interno. Las ventanas se crean en código para poder fijar también la carpeta de caché de WebView2. La base de datos de versiones anteriores se mueve sola.

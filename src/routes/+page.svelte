@@ -1,6 +1,5 @@
 <script lang="ts">
   import { appVersion, invoke, listen } from "$lib/tauri";
-  import { isNewer, latestVersion } from "$lib/updates";
   import { onMount } from "svelte";
   import { texts, type Lang } from "$lib/i18n";
   import OverlayText from "$lib/OverlayText.svelte";
@@ -88,7 +87,23 @@
   });
 
   // Aviso de versión nueva.
+  let version = $state("");
   let update = $state<string | null>(null);
+  let updating = $state(false);
+  let updateFailed = $state(false);
+
+  async function installUpdate() {
+    updating = true;
+    updateFailed = false;
+    try {
+      // Si va bien, el programa se cierra y se abre la versión nueva.
+      await invoke("install_update");
+    } catch {
+      updateFailed = true;
+    } finally {
+      updating = false;
+    }
+  }
 
   // Idioma de la interfaz: el guardado o, la primera vez, el del sistema.
   const lang = $derived<Lang>(
@@ -122,6 +137,7 @@
 
   onMount(() => {
     run("get_stats");
+    appVersion().then((value) => (version = value));
     invoke<boolean>("is_debug").then((value) => (debug = value));
     invoke<Diag>("get_diag").then((value) => (diag = value));
     invoke<Settings>("get_settings").then((value) => {
@@ -130,9 +146,9 @@
       // genere sus mensajes en el mismo idioma que la interfaz.
       if (!value.language) save({ language: lang });
       if (value.checkUpdates) {
-        Promise.all([latestVersion(), appVersion()]).then(([latest, current]) => {
-          if (latest && isNewer(latest, current)) update = latest;
-        });
+        invoke<string | null>("check_update")
+          .then((version) => (update = version))
+          .catch(() => {});
       }
     });
     const listeners = [
@@ -253,12 +269,18 @@
   {:else}
   {#if update}
     <div class="aviso" role="status">
-      <span>{t.updateAvailable(update)}</span>
+      <span>
+        {#if updating}{t.updating(update)}{:else if updateFailed}{t.updateFailed}{:else}{t.updateAvailable(update)}{/if}
+      </span>
       <span class="botones">
-        <button class="principal" onclick={() => invoke("open_releases").catch((e) => (error = String(e)))}>
-          {t.download}
-        </button>
-        <button class="cerrar" aria-label={t.close} onclick={() => (update = null)}>×</button>
+        {#if updateFailed}
+          <button class="principal" onclick={() => invoke("open_releases").catch((e) => (error = String(e)))}>
+            {t.download}
+          </button>
+        {:else}
+          <button class="principal" disabled={updating} onclick={installUpdate}>{t.update}</button>
+        {/if}
+        <button class="cerrar" aria-label={t.close} disabled={updating} onclick={() => (update = null)}>×</button>
       </span>
     </div>
   {/if}
@@ -520,6 +542,10 @@
         {/if}
       </div>
     </section>
+
+    {#if version}
+      <p class="version">Fortnite Chest Counter · v{version}</p>
+    {/if}
   {/if}
 
   {#if tab === "diag" && diag}
@@ -960,6 +986,17 @@
 
   .historial strong {
     font-size: 24px;
+  }
+
+  /* Versión instalada, discreta al pie de Configuración. */
+  .version {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-align: center;
+    opacity: 0.75;
+    user-select: text;
   }
 
   .vacio {

@@ -1,6 +1,6 @@
 [package]
 name = "fortnite-chest-counter"
-version = "1.1.1"
+version = "1.1.2"
 description = "Contador de cofres para Fortnite"
 authors = ["JaimeCardonagz"]
 license = "MIT"
@@ -32,6 +32,11 @@ rusqlite = "0.41.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 base64 = "0.23.1"
 tauri-plugin-global-shortcut = "2"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+# Actualizaciones: HTTPS con el TLS del sistema (SChannel en Windows) y firmas Ed25519.
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
+native-tls = "0.2.18"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

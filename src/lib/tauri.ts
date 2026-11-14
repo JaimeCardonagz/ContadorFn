@@ -62,6 +62,7 @@ const sample: Record<string, unknown> = {
     hudVisible: true,
   },
   is_debug: false,
+  check_update: "1.2.0",
   get_history: [
     { id: 6, durationMs: 1_114_000, counts: counts(9, 2, 1) },
     { id: 5, durationMs: 742_000, counts: counts(5, 0, 1) },
@@ -72,6 +73,7 @@ const sample: Record<string, unknown> = {
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (inTauri) return tauriInvoke<T>(command, args);
+  if (command === "install_update") return Promise.reject("Solo disponible en la app de Windows.");
   return Promise.resolve((sample[command] ?? sample.get_stats) as T);
 }
 
@@ -80,7 +82,7 @@ export function listen<T>(event: string, handler: EventCallback<T>): Promise<Unl
   return Promise.resolve(() => {});
 }
 
-/** Versión de la app (en el navegador, una de ejemplo antigua para ver el aviso). */
+/** Versión instalada de la app (en el navegador, una de ejemplo). */
 export function appVersion(): Promise<string> {
-  return inTauri ? getVersion() : Promise.resolve("1.0.0");
+  return inTauri ? getVersion() : Promise.resolve("1.1.2");
 }
