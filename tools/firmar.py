@@ -1,7 +1,9 @@
 """Firma el ejecutable para las actualizaciones automáticas.
 
 Escribe junto al .exe un archivo .sig con la firma Ed25519 (en base64) de un
-manifiesto que une la versión y el SHA-256 del archivo. La app lleva dentro la
+manifiesto que une la versión y el SHA-256 del archivo. Esa firma se pega en
+las notas del Release como comentario invisible:
+    <!-- firma-actualizacion: FIRMA --> La app lleva dentro la
 clave pública y rechaza cualquier descarga cuya firma no coincida, o cuya
 versión no sea posterior a la instalada.
 

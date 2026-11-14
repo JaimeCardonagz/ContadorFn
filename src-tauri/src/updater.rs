@@ -10,6 +10,8 @@
 //!   clave privada del proyecto, sobre un manifiesto que une su versión y su
 //!   SHA-256. Así no se acepta un archivo alterado, ni uno firmado para otra
 //!   versión, ni una versión antigua (debe ser posterior a la instalada).
+//!   La firma va en un comentario invisible de las notas del Release (así el
+//!   Release solo enseña el .exe); el sitio da igual, lo que protege es la firma.
 //! - Tamaño máximo de descarga y tiempos de espera.
 //! - La interfaz no elige qué se instala: solo puede instalar la versión que
 //!   esta misma comprobación encontró y verificó.
@@ -30,6 +32,10 @@ const PUBLIC_KEY: [u8; 32] = [
 ];
 const LATEST_URL: &str = "https://api.github.com/repos/JaimeCardonagz/ContadorFn/releases/latest";
 const DOWNLOAD_URL: &str = "https://github.com/JaimeCardonagz/ContadorFn/releases/download";
+const RELEASE_BY_TAG_URL: &str =
+    "https://api.github.com/repos/JaimeCardonagz/ContadorFn/releases/tags";
+/// Marca del comentario con la firma en las notas del Release.
+const SIGNATURE_MARK: &str = "<!-- firma-actualizacion: ";
 const ASSET: &str = "FortniteChestCounter.exe";
 /// Ningún ejecutable del proyecto se acerca a esto (pesa unos 7 MB).
 const MAX_EXE_BYTES: u64 = 64 * 1024 * 1024;
@@ -155,15 +161,54 @@ pub fn download_verified(version: Version) -> Result<Vec<u8>, String> {
         return Err("la versión no es posterior a la instalada".into());
     }
     let agent = agent()?;
-    let base = format!("{DOWNLOAD_URL}/v{version}/{ASSET}");
-    let exe = fetch(&agent, &base, MAX_EXE_BYTES)?;
-    let signature = fetch(&agent, &format!("{base}.sig"), 1024)?;
-    let signature = String::from_utf8(signature).map_err(|_| "firma mal formada".to_string())?;
+    let release = fetch(
+        &agent,
+        &format!("{RELEASE_BY_TAG_URL}/v{version}"),
+        MAX_TEXT_BYTES,
+    )?;
+    let signature = signature_from_release(&release, version)?;
+    let exe = fetch(
+        &agent,
+        &format!("{DOWNLOAD_URL}/v{version}/{ASSET}"),
+        MAX_EXE_BYTES,
+    )?;
     verify_with(&PUBLIC_KEY, &exe, &signature, version)?;
     if !exe.starts_with(b"MZ") {
         return Err("el archivo no es un ejecutable de Windows".into());
     }
     Ok(exe)
+}
+
+/// Saca la firma del comentario invisible de las notas del Release, que
+/// debe ser el de `version`.
+fn signature_from_release(json: &[u8], version: Version) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct Release {
+        tag_name: String,
+        #[serde(default)]
+        body: Option<String>,
+    }
+    let release: Release =
+        serde_json::from_slice(json).map_err(|_| "respuesta no válida".to_string())?;
+    if Version::parse(&release.tag_name) != Some(version) {
+        return Err("el Release no es de la versión esperada".into());
+    }
+    let body = release.body.unwrap_or_default();
+    let start = body
+        .find(SIGNATURE_MARK)
+        .ok_or("el Release no lleva firma")?
+        + SIGNATURE_MARK.len();
+    let end = body[start..].find("-->").ok_or("firma mal formada")?;
+    let signature = body[start..start + end].trim();
+    let valid = !signature.is_empty()
+        && signature.len() <= 200
+        && signature
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b));
+    if !valid {
+        return Err("firma mal formada".into());
+    }
+    Ok(signature.to_string())
 }
 
 fn sibling(exe: &Path, suffix: &str) -> PathBuf {
@@ -258,6 +303,45 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    fn release(tag: &str, body: &str) -> Vec<u8> {
+        serde_json::json!({ "tag_name": tag, "body": body })
+            .to_string()
+            .into_bytes()
+    }
+
+    #[test]
+    fn saca_la_firma_del_comentario_de_las_notas() {
+        let body = format!("## Qué trae\n\n- algo\n\n<!-- firma-actualizacion: {TEST_SIG} -->\n");
+        let signature = signature_from_release(&release("v9.9.9", &body), V999).unwrap();
+        assert_eq!(signature, TEST_SIG);
+        assert_eq!(verify_with(&TEST_KEY, TEST_EXE, &signature, V999), Ok(()));
+    }
+
+    #[test]
+    fn rechaza_notas_sin_firma_de_otra_version_o_mal_formadas() {
+        let good = format!("<!-- firma-actualizacion: {TEST_SIG} -->");
+        assert!(
+            signature_from_release(&release("v9.9.8", &good), V999).is_err(),
+            "otra versión"
+        );
+        assert!(signature_from_release(&release("v9.9.9", "sin firma"), V999).is_err());
+        for bad in [
+            "<!-- firma-actualizacion:  -->",
+            "<!-- firma-actualizacion: <script>alert(1)</script> -->",
+            "<!-- firma-actualizacion: abc",
+        ] {
+            assert!(
+                signature_from_release(&release("v9.9.9", bad), V999).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(signature_from_release(b"no es json", V999).is_err());
+        assert!(
+            signature_from_release(br#"{"tag_name":"v9.9.9"}"#, V999).is_err(),
+            "sin notas"
+        );
     }
 
     #[test]

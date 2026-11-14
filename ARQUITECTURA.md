@@ -199,7 +199,7 @@ Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla s
   - Política de seguridad de contenido estricta en las ventanas: solo código propio, sin conexiones externas desde la interfaz (la comprobación de versión se hace en Rust).
   - El programa no abre puertos ni escucha conexiones.
 - Versión instalada visible al pie de Configuración.
-- Para publicar: el *Release* debe llevar `FortniteChestCounter.exe` **y** `FortniteChestCounter.exe.sig` (ambos salen del artefacto de *Build Windows*).
+- Para publicar (desde la 1.1.3): el *Release* lleva solo `FortniteChestCounter.exe`; la firma (contenido de `FortniteChestCounter.exe.sig`, que sale del artefacto de *Build Windows*) se pega en las notas como comentario invisible `<!-- firma-actualizacion: FIRMA -->`. La 1.1.2 buscaba un archivo `.sig` aparte, así que sus usuarios pasan a la 1.1.3 descargando a mano.
 
 ### Versión 1.1.1 (2026-11-14)
 
