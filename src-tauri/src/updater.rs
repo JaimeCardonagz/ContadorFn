@@ -448,4 +448,29 @@ mod tests {
         println!("descarga de una versión inexistente: {unsigned:?}");
         assert!(unsigned.is_err());
     }
+
+    /// Comprobación manual del camino completo contra un Release publicado:
+    /// firma en las notas → descarga del .exe → verificación con la clave real.
+    /// Uso: FCC_VERSION=1.1.3 cargo test extremo_a_extremo -- --ignored
+    #[test]
+    #[ignore]
+    fn extremo_a_extremo() {
+        let version = Version::parse(&std::env::var("FCC_VERSION").unwrap()).unwrap();
+        let agent = agent().unwrap();
+        let release = fetch(
+            &agent,
+            &format!("{RELEASE_BY_TAG_URL}/v{version}"),
+            MAX_TEXT_BYTES,
+        )
+        .unwrap();
+        let signature = signature_from_release(&release, version).unwrap();
+        let exe = fetch(
+            &agent,
+            &format!("{DOWNLOAD_URL}/v{version}/{ASSET}"),
+            MAX_EXE_BYTES,
+        )
+        .unwrap();
+        assert!(exe.starts_with(b"MZ"));
+        assert_eq!(verify_with(&PUBLIC_KEY, &exe, &signature, version), Ok(()));
+    }
 }
