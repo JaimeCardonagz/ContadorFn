@@ -13,6 +13,7 @@ use crate::diag::Diag;
 use crate::fuse::{self, FuseCounter};
 use crate::notice::{self, Reading, Suffix};
 use crate::now_ms;
+use crate::placement;
 use crate::scene::{self, MatchEvent, MatchWatcher};
 use crate::store::{ChestType, EndReason};
 use crate::vision::{Problem, Vision, is_black};
@@ -178,6 +179,11 @@ fn grab_health_bar(area: &Area) -> Result<Frame, String> {
     capture::grab_rect(x, y, w, h)
 }
 
+fn grab_placement_zone(area: &Area) -> Result<Frame, String> {
+    let (x, y, w, h) = area.absolute(placement::roi_rect(area.width, area.height));
+    capture::grab_rect(x, y, w, h)
+}
+
 fn grab_notice_zone(area: &Area) -> Result<Frame, String> {
     let (x, y, w, h) = area.absolute(notice::roi_rect(area.width, area.height));
     capture::grab_rect(x, y, w, h)
@@ -241,6 +247,12 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                     if let Some(problem) = vision.capture_failed() {
                         announce(problem);
                     }
+                    // El aviso sale en el contador: se muestra si el juego está delante.
+                    let wanted = diag.show_overlay() && capture::game_in_foreground();
+                    if wanted != overlay_shown {
+                        crate::set_overlay_visible(&app, wanted);
+                        overlay_shown = wanted;
+                    }
                     std::thread::sleep(RETRY);
                     continue;
                 }
@@ -301,6 +313,15 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                     if let Some(problem) = vision.capture_failed() {
                         announce(problem);
                     }
+                    // El aviso sale en el contador: se muestra si el juego está delante.
+                    let wanted = diag.show_overlay() && capture::game_in_foreground();
+                    if wanted != overlay_shown {
+                        crate::set_overlay_visible(&app, wanted);
+                        if wanted {
+                            crate::place_overlay(&app, &area);
+                        }
+                        overlay_shown = wanted;
+                    }
                     std::thread::sleep(RETRY);
                     continue;
                 }
@@ -323,7 +344,22 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 diag.set_hud_visible(visible);
                 // Solo hay resumen si de verdad se cerró una partida abierta.
                 let mut closed = false;
-                let change = match matches.step(now_ms(), visible) {
+                if crate::take_end_match_request() {
+                    matches.end_now();
+                    diag.log("partida: terminada a mano (atajo)");
+                }
+                let mut event = matches.step(now_ms(), visible);
+                // Sin HUD a mitad de partida: si sale la pantalla de puesto
+                // final ("QUEDASTE"), la partida terminó de verdad.
+                if event.is_none()
+                    && !visible
+                    && matches.in_match()
+                    && grab_placement_zone(&area).is_ok_and(|roi| placement::visible(&roi))
+                {
+                    diag.log("partida: pantalla de puesto final a la vista");
+                    event = matches.placement_seen(now_ms());
+                }
+                let change = match event {
                     Some(MatchEvent::Started) => {
                         diag.log("partida: empieza (se ve el HUD)");
                         Some(crate::update(&app, |tracker, now| {
@@ -331,7 +367,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                         }))
                     }
                     Some(MatchEvent::Ended { at }) => {
-                        diag.log("partida: termina (el HUD dejó de verse)");
+                        diag.log("partida: termina");
                         Some(crate::update(&app, |tracker, _| {
                             closed = tracker.stats()?.in_match;
                             tracker.match_ended(at, EndReason::Lobby)

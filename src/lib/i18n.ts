@@ -51,6 +51,7 @@ const es = {
   optOpacity: "Opacidad",
   sizes: { auto: "Automático", small: "Pequeño", medium: "Mediano", large: "Grande" } as Record<string, string>,
   help: {
+    endMatchHotkey: "Da por terminada la partida en curso al momento. Úsalo si vuelves al lobby antes de que acabe (por ejemplo, con «Regresar a la sala» mientras tu escuadra sigue jugando): así la siguiente partida se cuenta aparte enseguida. Cuando te eliminan, el programa ya lo detecta solo.",
     optTimer: "Muestra en el contador cuánto lleva la partida en curso.",
     recordStreak: "Días seguidos en los que llegaste a tu objetivo de cofres del día (con el objetivo de ahora).",
     dailyGoal: "Cuántos cofres quieres abrir hoy. El Contador enseña cuánto llevas y el contador sobre el juego puede mostrarlo. Déjalo vacío para no usarlo.",
@@ -161,6 +162,11 @@ const es = {
   historyEmpty: "Aún no hay partidas en las últimas 24 horas. Cada partida aparecerá aquí al terminar.",
   duration: "Duración",
   advanced: "Avanzado",
+  problemsShort: {
+    capture: "No se puede leer la pantalla",
+    black: "El juego se ve en negro",
+    small: "Ventana del juego muy pequeña",
+  } as Record<string, string>,
   problems: {
     capture: {
       title: "No se puede leer la pantalla",
@@ -230,11 +236,10 @@ const es = {
   whatsNewTitle: (version: string) => `Novedades de la versión ${version}`,
   gotIt: "Entendido",
   whatsNew: [
-    "El objetivo de cofres del día se pone ahora en la pestaña Contador, y te enseña tu racha de días seguidos cumpliéndolo.",
-    "Mejor racha del objetivo en Récords.",
-    "Opción para ver el tiempo de la partida en el contador sobre el juego.",
-    "Pestaña Contador más sencilla: solo queda Pausar conteo.",
-    "Las copias de seguridad se gestionan ahora desde la pestaña Diagnóstico.",
+    "El contador ya no parpadea al empezar la partida.",
+    "Si te eliminan pero tu escuadra sigue viva, la partida ya no se parte en dos: termina al salir la pantalla «QUEDASTE».",
+    "Nuevo atajo para terminar la partida a mano, por si vuelves al lobby antes de que acabe.",
+    "El aviso de que no se puede leer la pantalla sale también sobre el juego.",
   ],
   tabsLabel: "Secciones del panel",
   themes: { dark: "Oscuro", light: "Claro", system: "Como Windows" } as Record<string, string>,
@@ -242,6 +247,7 @@ const es = {
   optFlash: "Avisar al contar un cofre",
   shortcutsTitle: "Atajos de teclado",
   pauseHotkey: "Atajo para pausar el conteo",
+  endMatchHotkey: "Atajo para terminar la partida",
   hotkey: "Atajo para mostrar u ocultar",
   hotkeyNone: "sin atajo",
   hotkeyPress: "pulsa la combinación… (Esc cancela)",
@@ -327,6 +333,7 @@ const en: typeof es = {
   optOpacity: "Opacity",
   sizes: { auto: "Automatic", small: "Small", medium: "Medium", large: "Large" },
   help: {
+    endMatchHotkey: "Ends the current match right away. Use it if you go back to the lobby before it ends (for example, “Return to lobby” while your squad keeps playing): the next match is then counted separately right away. When you are eliminated, the app already detects it by itself.",
     optTimer: "Shows on the counter how long the current match has been going.",
     recordStreak: "Days in a row in which you reached your daily chest goal (with the current goal).",
     dailyGoal: "How many chests you want to open today. The Counter tab shows your progress and the in-game counter can show it too. Leave it empty to turn it off.",
@@ -437,6 +444,11 @@ const en: typeof es = {
   historyEmpty: "No matches in the last 24 hours yet. Each match will show up here when it ends.",
   duration: "Duration",
   advanced: "Advanced",
+  problemsShort: {
+    capture: "The screen can't be read",
+    black: "The game looks black",
+    small: "Game window too small",
+  },
   problems: {
     capture: {
       title: "The screen can't be read",
@@ -506,11 +518,10 @@ const en: typeof es = {
   whatsNewTitle: (version: string) => `What's new in version ${version}`,
   gotIt: "Got it",
   whatsNew: [
-    "The daily chest goal is now set in the Counter tab, and it shows your streak of days in a row reaching it.",
-    "Best goal streak in Records.",
-    "Option to show the match time on the in-game counter.",
-    "Simpler Counter tab: only Pause counting is left.",
-    "Backups are now managed from the Diagnostics tab.",
+    "The counter no longer flickers when a match starts.",
+    "If you're eliminated but your squad is still alive, the match is no longer split in two: it ends when the placement screen appears.",
+    "New shortcut to end the match by hand, in case you go back to the lobby before it ends.",
+    "The can't-read-the-screen warning also shows over the game.",
   ],
   tabsLabel: "Panel sections",
   themes: { dark: "Dark", light: "Light", system: "Like Windows" },
@@ -518,6 +529,7 @@ const en: typeof es = {
   optFlash: "Flash when a chest is counted",
   shortcutsTitle: "Keyboard shortcuts",
   pauseHotkey: "Pause counting shortcut",
+  endMatchHotkey: "End match shortcut",
   hotkey: "Show/hide shortcut",
   hotkeyNone: "no shortcut",
   hotkeyPress: "press the combination… (Esc cancels)",

@@ -39,14 +39,12 @@ const PLUS: [&str; 11] = [
 
 /// Lecturas seguidas con el HUD visible para dar por empezada una partida.
 const START_SAMPLES: u32 = 3;
-/// Durante los primeros minutos el HUD se oculta en el autobús: se tolera
-/// más tiempo sin verlo antes de dar la partida por terminada.
-const EARLY_PHASE_MS: i64 = 180_000;
-const EARLY_GRACE_MS: i64 = 60_000;
-/// Después, sin HUD durante este tiempo la partida ha terminado (eliminado o
-/// de vuelta en el lobby). Abrir el mapa o el inventario lo oculta solo unos
-/// segundos.
-const GRACE_MS: i64 = 25_000;
+/// Sin HUD durante este tiempo la partida ha terminado (salió al lobby sin
+/// pasar por la pantalla de puesto final). Es largo a propósito: el HUD
+/// también se oculta en el autobús, al abrir el mapa, mientras estás
+/// derribado y en la pantalla de eliminación antes de pasar a ver a un
+/// compañero. El final normal llega antes, con la pantalla "QUEDASTE".
+const GRACE_MS: i64 = 150_000;
 
 /// Rectángulo de la zona del HUD en una pantalla de `height` píxeles de alto:
 /// (x, y, ancho, alto).
@@ -132,6 +130,10 @@ pub enum MatchEvent {
 #[derive(Default)]
 pub struct MatchWatcher {
     in_match: bool,
+    /// Tras terminar la partida a mano: no empieza otra hasta que el HUD
+    /// deje de verse al menos una vez (puede que aún se esté mirando a un
+    /// compañero).
+    wait_absent: bool,
     started_at: i64,
     visible_streak: u32,
     absent_since: Option<i64>,
@@ -144,6 +146,12 @@ impl MatchWatcher {
     }
 
     pub fn step(&mut self, now: i64, bar_visible: bool) -> Option<MatchEvent> {
+        if self.wait_absent {
+            if bar_visible {
+                return None;
+            }
+            self.wait_absent = false;
+        }
         if !self.in_match {
             self.visible_streak = if bar_visible {
                 self.visible_streak + 1
@@ -164,17 +172,33 @@ impl MatchWatcher {
             return None;
         }
         let since = *self.absent_since.get_or_insert(now);
-        let grace = if since - self.started_at < EARLY_PHASE_MS {
-            EARLY_GRACE_MS
-        } else {
-            GRACE_MS
-        };
-        if now - since < grace {
+        if now - since < GRACE_MS {
             return None;
         }
         self.in_match = false;
         self.absent_since = None;
         Some(MatchEvent::Ended { at: since })
+    }
+
+    /// La partida se terminó a mano: la siguiente que se vea empieza aparte.
+    pub fn end_now(&mut self) {
+        self.in_match = false;
+        self.absent_since = None;
+        self.visible_streak = 0;
+        self.wait_absent = true;
+    }
+
+    /// Se vio la pantalla de puesto final ("QUEDASTE"): la partida terminó,
+    /// en el momento en que dejó de verse el HUD.
+    pub fn placement_seen(&mut self, now: i64) -> Option<MatchEvent> {
+        if !self.in_match {
+            return None;
+        }
+        let at = self.absent_since.unwrap_or(now);
+        self.in_match = false;
+        self.absent_since = None;
+        self.visible_streak = 0;
+        Some(MatchEvent::Ended { at })
     }
 }
 
@@ -239,13 +263,13 @@ mod tests {
     #[test]
     fn sin_hud_la_partida_termina_en_el_momento_en_que_desaparecio() {
         let mut w = MatchWatcher::default();
-        let events = run(&mut w, 0, &[(true, 600), (false, 120)]);
+        let events = run(&mut w, 0, &[(true, 600), (false, 200)]);
         assert_eq!(
             events,
             [
                 (2, MatchEvent::Started),
-                // Se decide a los 25 s, pero el final es cuando dejó de verse.
-                (625, MatchEvent::Ended { at: 600 * SEC }),
+                // Se decide a los 150 s, pero el final es cuando dejó de verse.
+                (750, MatchEvent::Ended { at: 600 * SEC }),
             ]
         );
     }
@@ -258,9 +282,42 @@ mod tests {
             events,
             [
                 (2, MatchEvent::Started),
-                (100, MatchEvent::Ended { at: 40 * SEC })
+                (190, MatchEvent::Ended { at: 40 * SEC })
             ]
         );
+    }
+
+    #[test]
+    fn derribado_o_viendo_a_un_companero_no_termina_la_partida() {
+        let mut w = MatchWatcher::default();
+        // Derribado y pantalla de eliminación 2 min sin HUD; luego se ve el
+        // HUD del compañero al que miras y, tras reaparecer, el tuyo.
+        let events = run(&mut w, 0, &[(true, 600), (false, 120), (true, 300)]);
+        assert_eq!(events, [(2, MatchEvent::Started)]);
+    }
+
+    #[test]
+    fn terminar_a_mano_espera_a_que_el_hud_desaparezca_antes_de_otra() {
+        let mut w = MatchWatcher::default();
+        run(&mut w, 0, &[(true, 300)]);
+        w.end_now();
+        // Aún se ve un HUD (mirando a un compañero): no empieza otra.
+        let events = run(&mut w, 300, &[(true, 60), (false, 30), (true, 10)]);
+        assert_eq!(events, [(392, MatchEvent::Started)]);
+    }
+
+    #[test]
+    fn la_pantalla_de_puesto_final_termina_la_partida_al_momento() {
+        let mut w = MatchWatcher::default();
+        run(&mut w, 0, &[(true, 600), (false, 8)]);
+        assert_eq!(
+            w.placement_seen(608 * SEC),
+            Some(MatchEvent::Ended { at: 600 * SEC })
+        );
+        assert_eq!(w.placement_seen(609 * SEC), None, "solo una vez");
+        // Volver enseguida a otra partida cuenta como una nueva.
+        let events = run(&mut w, 640, &[(false, 20), (true, 10)]);
+        assert_eq!(events, [(662, MatchEvent::Started)]);
     }
 
     #[test]
@@ -269,7 +326,7 @@ mod tests {
         let events = run(
             &mut w,
             0,
-            &[(true, 500), (false, 90), (true, 500), (false, 60)],
+            &[(true, 500), (false, 200), (true, 500), (false, 160)],
         );
         let kinds: Vec<_> = events.iter().map(|(_, e)| *e).collect();
         assert_eq!(
@@ -278,7 +335,7 @@ mod tests {
                 MatchEvent::Started,
                 MatchEvent::Ended { at: 500 * SEC },
                 MatchEvent::Started,
-                MatchEvent::Ended { at: 1_090 * SEC },
+                MatchEvent::Ended { at: 1_200 * SEC },
             ]
         );
     }
@@ -362,6 +419,34 @@ mod tests {
         }));
     }
 
+    /// Herramienta: ¿se ve el HUD en cada imagen de una ráfaga (RAFAGA_DIR)?
+    #[test]
+    #[ignore]
+    fn revisar_rafaga() {
+        let dir = std::env::var("RAFAGA_DIR").expect("RAFAGA_DIR");
+        let mut files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|e| e == "jpg" || e == "png"))
+            .collect();
+        files.sort();
+        for path in files {
+            let image = image::open(&path).unwrap().into_rgb8();
+            let (x, y, w, h) = zone_rect(image.height());
+            let crop = image::imageops::crop_imm(&image, x, y, w, h).to_image();
+            let frame = Frame {
+                width: crop.width(),
+                height: crop.height(),
+                rgb: crop.into_raw(),
+            };
+            println!(
+                "{} {}",
+                path.file_name().unwrap().to_string_lossy(),
+                hud_visible(&frame)
+            );
+        }
+    }
+
     /// Recortes reales de la zona del HUD (locales): `si_*` en partida, `no_*`
     /// en el lobby, en la pantalla de eliminación y tras la partida.
     #[test]
@@ -425,7 +510,7 @@ mod tests {
         // seguido de lobby la partida termina en ese momento.
         assert!(visible[128..].iter().all(|&bar| !bar));
         let mut end = None;
-        for second in visible.len()..visible.len() + 120 {
+        for second in visible.len()..visible.len() + 200 {
             end = end.or(w.step(second as i64 * SEC, false));
         }
         assert!(

@@ -18,8 +18,80 @@ pub struct Frame {
 /// dueño (GeForce NOW o Fortnite); el título solo vale si nombra GeForce NOW.
 /// No basta con que el título contenga "Fortnite": también lo contienen una
 /// carpeta, un vídeo o una pestaña del navegador.
+/// Última ventana del juego vista en primer plano (su HWND como número).
+#[cfg(windows)]
+static LAST_GAME_WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Título de la ventana del contador sobre el juego (en minúsculas).
+#[cfg(windows)]
+const OVERLAY_TITLE: &str = "fortnite chest counter - contador";
+
+/// ¿Es `window` el contador sobre el juego de este mismo programa?
+#[cfg(windows)]
+fn is_own_overlay(window: windows::Win32::Foundation::HWND) -> bool {
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowTextW, GetWindowThreadProcessId};
+    // SAFETY: búfer local con su tamaño; las llamadas solo leen.
+    unsafe {
+        let mut process_id = 0u32;
+        GetWindowThreadProcessId(window, Some(&mut process_id));
+        if process_id != GetCurrentProcessId() {
+            return false;
+        }
+        let mut title = [0u16; 64];
+        let length = GetWindowTextW(window, &mut title).max(0) as usize;
+        String::from_utf16_lossy(&title[..length]).to_lowercase() == OVERLAY_TITLE
+    }
+}
+
+/// Si al mostrarse el contador Windows le dio el foco, se lo devuelve al juego.
+/// Así el juego nunca deja de estar delante por culpa del contador.
+#[cfg(windows)]
+pub fn give_focus_back_to_game() {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, IsWindow, IsWindowVisible, SetForegroundWindow,
+    };
+    // SAFETY: solo se usan handles que se comprueban como ventanas válidas.
+    unsafe {
+        if !is_own_overlay(GetForegroundWindow()) {
+            return;
+        }
+        let game = HWND(LAST_GAME_WINDOW.load(std::sync::atomic::Ordering::Relaxed) as _);
+        if !game.is_invalid() && IsWindow(Some(game)).as_bool() && IsWindowVisible(game).as_bool() {
+            let _ = SetForegroundWindow(game);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn give_focus_back_to_game() {}
+
 #[cfg(windows)]
 fn foreground_game_window() -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindow, IsWindowVisible};
+
+    // Si el foco lo tiene el propio contador (Windows se lo da a veces al
+    // mostrarlo), el juego sigue siendo el de antes: no se pausa ni se oculta.
+    // SAFETY: el handle guardado se comprueba antes de usarlo.
+    unsafe {
+        let window = GetForegroundWindow();
+        if is_own_overlay(window) {
+            let game = HWND(LAST_GAME_WINDOW.load(std::sync::atomic::Ordering::Relaxed) as _);
+            return (!game.is_invalid()
+                && IsWindow(Some(game)).as_bool()
+                && IsWindowVisible(game).as_bool())
+            .then_some(game);
+        }
+    }
+    let game = foreground_window_if_game()?;
+    LAST_GAME_WINDOW.store(game.0 as isize, std::sync::atomic::Ordering::Relaxed);
+    Some(game)
+}
+
+#[cfg(windows)]
+fn foreground_window_if_game() -> Option<windows::Win32::Foundation::HWND> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
         OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,

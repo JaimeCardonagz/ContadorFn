@@ -182,6 +182,13 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Versión 1.4.1 (2026-11-18)
+
+- **Parpadeo del contador al empezar la partida**: al mostrarse, Windows le daba el foco al contador y se lo quitaba a GeForce NOW; el programa creía que el juego ya no estaba delante, lo ocultaba, el foco volvía y vuelta a empezar (cada segundo, mientras el jugador no pulsaba nada). Ahora el contador no es activable (`focusable(false)`, salvo al colocarlo), si aun así recibe el foco se le devuelve al juego (`capture::give_focus_back_to_game`) y, si el foco lo tiene el propio contador, se sigue considerando delante la última ventana del juego.
+- **Aviso de que no se ve el juego en el contador** (línea ámbar), además del panel. Si la captura falla, el contador se muestra igualmente con el juego delante.
+- **Fin de partida en escuadras**: al morir con la escuadra viva, el HUD desaparece un rato (derribado, pantalla de eliminación) y luego se ve el del compañero; con 25 s de margen se partía en dos. Ahora la partida termina al ver la pantalla de puesto final "QUEDASTE N.º" (`placement.rs`, dos plantillas sacadas de un vídeo real, coincidencia ≥ 0,75) y, sin ella, tras 150 s sin HUD.
+- **Atajo "Terminar partida"** (`endMatchHotkey`): cierra la partida al momento (fin manual) para cuando se vuelve al lobby sin pasar por la pantalla final; el vigilante no abre otra hasta que el HUD desaparezca y vuelva. Los tres atajos globales se registran juntos y no pueden repetirse.
+
 ### Versión 1.4.0 (2026-11-18)
 
 - Fuera **Copiar resumen**, **Deshacer el último cofre** y los botones **Iniciar**, **Detener** y **Nueva partida** (también "Nueva partida" del menú de la bandeja). La sesión del día se abre y se cierra sola; el Contador solo ofrece **Pausar conteo**.

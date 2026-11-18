@@ -42,13 +42,14 @@ const sample: Record<string, unknown> = {
     overlayY: 0,
     overlayHotkey: "Ctrl+Shift+KeyO",
     pauseHotkey: "",
+    endMatchHotkey: "",
     overlayOnlyInMatch: false,
     overlayFlash: true,
     dailyGoal: 80,
     overlayGoal: true,
     overlayTimer: true,
     theme: new URLSearchParams(location.search).get("tema") ?? "dark",
-    lastSeenVersion: new URLSearchParams(location.search).get("novedades") !== null ? "1.3.0" : "1.4.0",
+    lastSeenVersion: new URLSearchParams(location.search).get("novedades") !== null ? "1.4.0" : "1.4.1",
     corner: "top-left",
     setupDone: new URLSearchParams(location.search).get("inicio") === null,
     overlayMatch: "total",
@@ -139,5 +140,5 @@ export function startDragging(): void {
 
 /** Versión instalada de la app (en el navegador, una de ejemplo). */
 export function appVersion(): Promise<string> {
-  return inTauri ? getVersion() : Promise.resolve("1.4.0");
+  return inTauri ? getVersion() : Promise.resolve("1.4.1");
 }

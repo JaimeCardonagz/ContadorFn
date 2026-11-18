@@ -89,6 +89,8 @@ pub struct Settings {
     pub overlay_hotkey: String,
     /// Atajo global para pausar o reanudar el conteo. Vacío: sin atajo.
     pub pause_hotkey: String,
+    /// Atajo global para terminar la partida en curso. Vacío: sin atajo.
+    pub end_match_hotkey: String,
     /// Tamaño del texto del contador: "small", "medium" o "large".
     pub overlay_size: String,
     /// Opacidad del contador, de 40 a 100.
@@ -126,6 +128,7 @@ impl Default for Settings {
             last_seen_version: String::new(),
             overlay_hotkey: String::new(),
             pause_hotkey: String::new(),
+            end_match_hotkey: String::new(),
             overlay_size: "medium".into(),
             overlay_opacity: 100,
         }
@@ -207,6 +210,7 @@ mod tests {
                 last_seen_version: "1.2.0".into(),
                 overlay_hotkey: "Ctrl+Alt+KeyC".into(),
                 pause_hotkey: "Ctrl+Alt+KeyP".into(),
+                end_match_hotkey: "Ctrl+Alt+KeyT".into(),
                 overlay_size: "large".into(),
                 overlay_opacity: 60,
             };

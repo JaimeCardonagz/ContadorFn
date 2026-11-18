@@ -37,9 +37,20 @@
     flash?: { kind: "normal" | "rare" | "spirit"; id: number } | null;
     /** Hora actual (epoch ms), para el tiempo de partida. */
     now?: number;
+    /** Problema para ver el juego: se avisa encima de todo. */
+    problem?: string;
   };
-  let { stats, options, t, right = false, summary = null, areaHeight = 1080, flash = null, now = Date.now() }: Props =
-    $props();
+  let {
+    stats,
+    options,
+    t,
+    right = false,
+    summary = null,
+    areaHeight = 1080,
+    flash = null,
+    now = Date.now(),
+    problem = "none",
+  }: Props = $props();
   /** "12:34" (o "1:02:03" si pasa de una hora). */
   function elapsed(since: number) {
     const s = Math.max(0, Math.floor((now - since) / 1000));
@@ -64,6 +75,7 @@
   style:font-size="{fontSize}px"
   style:opacity={options.overlayOpacity / 100}
 >
+  {#if problem !== "none" && t.problemsShort[problem]}<p class="problema">⚠ {t.problemsShort[problem]}</p>{/if}
   {#if stats.paused}<p class="pausa">⏸ {t.overlayPaused}</p>{/if}
   {#if flash}
     {#key flash.id}
@@ -153,6 +165,12 @@
   }
   .pausa {
     color: #fbbf24;
+  }
+
+  /* El aviso de que no se ve el juego: siempre en ámbar, se use o no color. */
+  .problema {
+    color: #fbbf24;
+    font-weight: 700;
   }
 
   .color .meta {

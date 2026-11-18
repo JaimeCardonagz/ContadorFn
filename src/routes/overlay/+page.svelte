@@ -74,6 +74,9 @@
     return () => clearInterval(timer);
   });
 
+  // Problema para ver el juego (captura que falla, imagen en negro…).
+  let problem = $state("none");
+
   // Alto de la zona del juego (tamaño automático del texto).
   let areaHeight = $state(1080);
 
@@ -116,10 +119,14 @@
 
   onMount(() => {
     invoke<Stats>("get_stats").then(onStats);
+    invoke<string>("get_vision_problem")
+      .then((value) => (problem = value))
+      .catch(() => {});
     invoke<Settings>("get_settings").then((value) => (settings = value));
     const listeners = [
       listen<Stats>("stats-changed", (event) => onStats(event.payload)),
       listen<number>("overlay-area", (event) => (areaHeight = event.payload)),
+      listen<string>("vision-problem", (event) => (problem = event.payload)),
       listen<Settings>("settings-changed", (event) => (settings = event.payload)),
       listen<Summary>("match-summary", (event) => showSummary(event.payload)),
       listen<boolean>("overlay-moving", (event) => (moving = event.payload)),
@@ -144,7 +151,7 @@
   >
     <div class="contenido" bind:this={content}>
       {#if moving}<span class="pista">{texts[lang].moveDrag}</span>{/if}
-      <OverlayText {stats} {summary} {areaHeight} {flash} {now} options={settings} t={texts[lang]} right={right && !moving} />
+      <OverlayText {stats} {summary} {areaHeight} {flash} {now} {problem} options={settings} t={texts[lang]} right={right && !moving} />
     </div>
   </main>
 {/if}

@@ -12,6 +12,7 @@ mod notice;
 mod notice_templates;
 mod panel;
 mod paths;
+mod placement;
 mod scene;
 mod settings;
 mod store;
@@ -65,10 +66,13 @@ struct BackupDir(std::path::PathBuf);
 
 /// Atajo global que muestra u oculta el contador (el registrado ahora). Solo
 /// existe si el sistema de atajos globales arrancó bien.
-struct Hotkeys(Mutex<[Option<Shortcut>; 2]>);
-/// Posiciones en `Hotkeys`: mostrar u ocultar el contador y pausar el conteo.
+struct Hotkeys(Mutex<[Option<Shortcut>; HOTKEY_COUNT]>);
+/// Posiciones en `Hotkeys`: mostrar u ocultar el contador, pausar el conteo
+/// y terminar la partida.
 const HOTKEY_OVERLAY: usize = 0;
 const HOTKEY_PAUSE: usize = 1;
+const HOTKEY_END_MATCH: usize = 2;
+const HOTKEY_COUNT: usize = 3;
 /// Versión nueva encontrada por `check_update`: la única que se puede instalar.
 struct UpdateState(Mutex<Option<updater::Version>>);
 
@@ -223,7 +227,14 @@ fn set_settings(
     settings: Settings,
 ) -> Result<(), String> {
     // Antes que nada: si un atajo no se puede registrar, no se guarda nada.
-    set_global_hotkeys(&app, &settings.overlay_hotkey, &settings.pause_hotkey)?;
+    set_global_hotkeys(
+        &app,
+        [
+            &settings.overlay_hotkey,
+            &settings.pause_hotkey,
+            &settings.end_match_hotkey,
+        ],
+    )?;
     let mut tracker = state.0.lock().map_err(|e| e.to_string())?;
     tracker
         .save_settings(&settings)
@@ -417,6 +428,7 @@ fn start_overlay_move(app: AppHandle, state: State<AppState>) -> Result<(), Stri
         );
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
+    let _ = window.set_focusable(true);
     let _ = window.show();
     let _ = window.set_ignore_cursor_events(false);
     let _ = window.set_focus();
@@ -453,6 +465,7 @@ fn finish_overlay_move(
     drop(tracker);
     MOVING_OVERLAY.store(false, Relaxed);
     let _ = window.set_ignore_cursor_events(true);
+    let _ = window.set_focusable(false);
     let _ = window.hide();
     let _ = app.emit("overlay-moving", false);
     let _ = app.emit("settings-changed", &settings);
@@ -528,6 +541,8 @@ pub(crate) fn set_overlay_visible(app: &AppHandle, visible: bool) {
     // que todavía no existe en pantalla.
     let _ = overlay.show();
     let _ = overlay.set_ignore_cursor_events(true);
+    // Mostrarla puede quitarle el foco al juego: se le devuelve.
+    capture::give_focus_back_to_game();
     if let Some(panel) = app.get_webview_window("main") {
         let _ = panel.hide();
     }
@@ -885,36 +900,65 @@ fn set_hotkey_slot(app: &AppHandle, slot: usize, wanted: Option<Shortcut>) -> Re
     Ok(())
 }
 
-/// Registra los dos atajos globales (contador y pausa). Si alguno falla, todo
-/// queda como estaba.
-fn set_global_hotkeys(app: &AppHandle, overlay: &str, pause: &str) -> Result<(), String> {
-    let (overlay, pause) = (parse_hotkey(overlay)?, parse_hotkey(pause)?);
-    if overlay.is_some() && overlay == pause {
-        return Err(tr(
-            "Los dos atajos no pueden ser iguales.",
-            "The two shortcuts can't be the same.",
-        )
-        .into());
+/// Registra los atajos globales (contador, pausa y terminar partida), en el
+/// orden de `HOTKEY_*`. Si alguno falla, todo queda como estaba.
+fn set_global_hotkeys(app: &AppHandle, accels: [&str; HOTKEY_COUNT]) -> Result<(), String> {
+    let mut wanted = [None; HOTKEY_COUNT];
+    for (slot, accel) in accels.iter().enumerate() {
+        wanted[slot] = parse_hotkey(accel)?;
+    }
+    for (i, a) in wanted.iter().enumerate() {
+        if a.is_some() && wanted[i + 1..].contains(a) {
+            return Err(tr(
+                "Dos atajos no pueden ser iguales.",
+                "Two shortcuts can't be the same.",
+            )
+            .into());
+        }
     }
     let previous = app
         .try_state::<Hotkeys>()
         .and_then(|state| state.0.lock().ok().map(|c| *c))
         .unwrap_or_default();
     // Primero se sueltan los que cambian, por si se intercambian entre sí.
-    for (slot, wanted) in [(HOTKEY_OVERLAY, overlay), (HOTKEY_PAUSE, pause)] {
-        if previous[slot] != wanted {
+    for slot in 0..HOTKEY_COUNT {
+        if previous[slot] != wanted[slot] {
             set_hotkey_slot(app, slot, None)?;
         }
     }
-    let result = set_hotkey_slot(app, HOTKEY_OVERLAY, overlay)
-        .and_then(|_| set_hotkey_slot(app, HOTKEY_PAUSE, pause));
+    let result = (0..HOTKEY_COUNT).try_for_each(|slot| set_hotkey_slot(app, slot, wanted[slot]));
     if result.is_err() {
-        let _ = set_hotkey_slot(app, HOTKEY_OVERLAY, None);
-        let _ = set_hotkey_slot(app, HOTKEY_PAUSE, None);
-        let _ = set_hotkey_slot(app, HOTKEY_OVERLAY, previous[HOTKEY_OVERLAY]);
-        let _ = set_hotkey_slot(app, HOTKEY_PAUSE, previous[HOTKEY_PAUSE]);
+        for slot in 0..HOTKEY_COUNT {
+            let _ = set_hotkey_slot(app, slot, None);
+        }
+        for (slot, shortcut) in previous.into_iter().enumerate() {
+            let _ = set_hotkey_slot(app, slot, shortcut);
+        }
     }
     result
+}
+
+/// Termina la partida en curso ahora mismo (atajo global): para cuando se
+/// vuelve al lobby sin pasar por la pantalla de puesto final.
+fn end_match_now(app: &AppHandle) {
+    let mut closed = false;
+    let result = update(app, |t, now| {
+        closed = t.stats()?.in_match;
+        t.match_ended(now, store::EndReason::Manual)
+    });
+    if closed && result.is_ok() {
+        announce_match_summary(app);
+    }
+    // El vigilante de partidas deja de dar la partida por abierta.
+    END_MATCH_REQUESTED.store(true, Relaxed);
+}
+
+/// Pedido desde el atajo "Terminar partida"; lo recoge el bucle de detección.
+static END_MATCH_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// ¿Se pidió terminar la partida a mano? (y lo da por atendido)
+pub(crate) fn take_end_match_request() -> bool {
+    END_MATCH_REQUESTED.swap(false, Relaxed)
 }
 
 /// Pausa o reanuda el conteo (menú de la bandeja y atajo global).
@@ -1015,6 +1059,7 @@ fn create_windows(
         .resizable(false)
         .shadow(false)
         .focused(false)
+        .focusable(false)
         .visible(false)
         .data_directory(webview_dir.to_path_buf())
         .build()?;
@@ -1108,6 +1153,8 @@ pub fn run() {
                             toggle_overlay(app);
                         } else if slot == Some(HOTKEY_PAUSE) {
                             toggle_pause(app);
+                        } else if slot == Some(HOTKEY_END_MATCH) {
+                            end_match_now(app);
                         } else if shortcut.mods.is_empty()
                             && matches!(shortcut.key, Code::F8 | Code::F9)
                         {
@@ -1117,12 +1164,15 @@ pub fn run() {
                     .build(),
             ) {
                 Ok(()) => {
-                    app.manage(Hotkeys(Mutex::new([None; 2])));
+                    app.manage(Hotkeys(Mutex::new([None; HOTKEY_COUNT])));
                     set_hotkeys(app.handle(), &diag, settings.diagnostics);
                     if let Err(error) = set_global_hotkeys(
                         app.handle(),
-                        &settings.overlay_hotkey,
-                        &settings.pause_hotkey,
+                        [
+                            &settings.overlay_hotkey,
+                            &settings.pause_hotkey,
+                            &settings.end_match_hotkey,
+                        ],
                     ) {
                         diag.log(&format!("atajos globales: {error}"));
                     }

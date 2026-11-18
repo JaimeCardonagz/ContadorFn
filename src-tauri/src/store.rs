@@ -27,8 +27,7 @@ pub enum EndReason {
     Eliminated,
     Victory,
     Lobby,
-    /// Partida cerrada a mano (versiones anteriores; hoy solo en pruebas).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Partida cerrada a mano (atajo "Terminar partida").
     Manual,
 }
 

@@ -16,6 +16,7 @@ Funciona tanto con **GeForce NOW** como con el **launcher directo de Fortnite**.
 - El contador solo aparece con el juego delante, se adapta a la ventana y la resolución del juego, y se puede mostrar u ocultar con un **atajo de teclado**.
 - **Historial** de las partidas de las últimas 24 horas y **récords**: más cofres en una partida, partida más larga y promedio del día.
 - **Pausa** el conteo cuando quieras, desde el panel, el icono de la bandeja o con un atajo de teclado.
+- Detecta solo cuándo termina cada partida; si vuelves al lobby antes de tiempo, un atajo de teclado la da por terminada.
 - Puede **iniciarse con Windows**; al cerrar el panel, el programa sigue en la bandeja, junto al reloj. Al pasar el ratón por su icono ves los cofres de la partida y del día.
 - Guarda una **copia de seguridad** de tus estadísticas cada día.
 - Ponte un **objetivo de cofres del día**, ve cuánto te falta (también sobre el juego) y mantén tu **racha** de días cumpliéndolo.

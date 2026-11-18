@@ -62,6 +62,7 @@
     matchSummary: boolean;
     overlayHotkey: string;
     pauseHotkey: string;
+    endMatchHotkey: string;
     overlayOnlyInMatch: boolean;
     overlayFlash: boolean;
     dailyGoal: number;
@@ -447,7 +448,7 @@
   }
 
   // Atajo global para mostrar u ocultar el contador, como "Ctrl+Shift+KeyO".
-  type HotkeyField = "overlayHotkey" | "pauseHotkey";
+  type HotkeyField = "overlayHotkey" | "pauseHotkey" | "endMatchHotkey";
   let capturingHotkey = $state<HotkeyField | null>(null);
   let hotkeyHintFor = $state<HotkeyField | null>(null);
   let hotkeyHint = $state("");
@@ -1118,6 +1119,7 @@
       <div class="fila"><span>{t.shortcutsTitle}</span></div>
       {@render hotkeyRow("overlayHotkey", t.hotkey, t.help.hotkey)}
       {@render hotkeyRow("pauseHotkey", t.pauseHotkey, t.help.pauseHotkey)}
+      {@render hotkeyRow("endMatchHotkey", t.endMatchHotkey, t.help.endMatchHotkey)}
     </section>
 
     <section>
