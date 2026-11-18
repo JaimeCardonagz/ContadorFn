@@ -11,16 +11,8 @@ use serde::Serialize;
 pub const DEFAULT_INACTIVITY_MS: i64 = 60 * 60 * 1000;
 /// El historial enseña las partidas de las últimas 24 horas.
 pub const HISTORY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
-/// El último cofre se puede deshacer durante este tiempo.
-pub const UNDO_WINDOW_MS: i64 = 5 * 60 * 1000;
-
-/// Último cofre contado, para poder deshacerlo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct LastChest {
-    pub kind: ChestType,
-    pub at: i64,
-}
-
+/// Un día en milisegundos.
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 /// Récords para la pestaña Estadísticas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,10 +40,59 @@ pub struct Stats {
     pub session_matches: u32,
     /// Partidas de siempre, incluidos los ajustes manuales.
     pub total_matches: u32,
-    /// Último cofre contado (la interfaz solo ofrece deshacerlo si es reciente).
-    pub last_chest: Option<LastChest>,
     /// Conteo en pausa: no se cuentan cofres ni partidas nuevas.
     pub paused: bool,
+    /// Inicio de la partida en curso (epoch ms), para el tiempo de partida.
+    pub match_started_at: Option<i64>,
+}
+
+/// Racha del objetivo diario: días seguidos llegando al objetivo de cofres.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Streak {
+    /// Racha actual: termina hoy si hoy ya se cumplió, o ayer si aún no.
+    pub current: u32,
+    /// La racha más larga.
+    pub best: u32,
+    /// ¿Se cumplió ya hoy?
+    pub today_done: bool,
+}
+
+/// Calcula la racha a partir de los cofres de cada día (número de día local
+/// y cofres de ese día, en cualquier orden).
+pub fn streak(days: &[(i64, u32)], goal: u32, today: i64) -> Streak {
+    if goal == 0 {
+        return Streak::default();
+    }
+    let mut done: Vec<i64> = days
+        .iter()
+        .filter(|(_, chests)| *chests >= goal)
+        .map(|(day, _)| *day)
+        .collect();
+    done.sort_unstable();
+    done.dedup();
+    let (mut best, mut run, mut previous) = (0u32, 0u32, None::<i64>);
+    for &day in &done {
+        run = if previous == Some(day - 1) {
+            run + 1
+        } else {
+            1
+        };
+        best = best.max(run);
+        previous = Some(day);
+    }
+    let today_done = done.binary_search(&today).is_ok();
+    let mut current = 0;
+    let mut day = if today_done { today } else { today - 1 };
+    while done.binary_search(&day).is_ok() {
+        current += 1;
+        day -= 1;
+    }
+    Streak {
+        current,
+        best,
+        today_done,
+    }
 }
 
 pub struct Tracker {
@@ -65,6 +106,8 @@ pub struct Tracker {
     last_activity: i64,
     /// Conteo en pausa (solo mientras el programa sigue abierto).
     paused: bool,
+    /// Inicio de la partida en curso.
+    match_started_at: i64,
 }
 
 impl Tracker {
@@ -81,6 +124,7 @@ impl Tracker {
             shown_match: None,
             last_activity,
             paused: false,
+            match_started_at: 0,
         })
     }
 
@@ -139,6 +183,7 @@ impl Tracker {
     }
 
     /// Cierra la sesión activa (y su partida en curso, como final manual).
+    #[cfg(test)]
     pub fn stop_session(&mut self, now: i64) -> Result<()> {
         self.match_ended(now, EndReason::Manual)?;
         if let Some((id, _)) = self.session.take() {
@@ -163,6 +208,7 @@ impl Tracker {
         let id = self.store.start_match(session_id, now)?;
         self.active_match = Some(id);
         self.shown_match = Some(id);
+        self.match_started_at = now;
         self.last_activity = now;
         Ok(())
     }
@@ -177,7 +223,8 @@ impl Tracker {
         Ok(())
     }
 
-    /// Atajo "forzar nueva partida": cierra la actual y abre otra.
+    /// Cierra la partida actual y abre otra (solo en pruebas).
+    #[cfg(test)]
     pub fn force_new_match(&mut self, now: i64) -> Result<()> {
         self.match_ended(now, EndReason::Manual)?;
         self.match_started(now)
@@ -240,6 +287,17 @@ impl Tracker {
         self.store.backup_to(path)
     }
 
+    /// Racha del objetivo diario. `offset_ms`: diferencia de la hora local
+    /// con la UTC, para saber a qué día local pertenece cada cofre.
+    pub fn streak(&self, now: i64, offset_ms: i64) -> Result<Streak> {
+        let goal = self.settings()?.daily_goal;
+        if goal == 0 {
+            return Ok(Streak::default());
+        }
+        let days = self.store.chests_per_day(offset_ms)?;
+        Ok(streak(&days, goal, (now + offset_ms).div_euclid(DAY_MS)))
+    }
+
     pub fn settings(&self) -> Result<Settings> {
         Ok(Settings::from_json(self.store.meta("settings")?.as_deref()))
     }
@@ -267,18 +325,6 @@ impl Tracker {
     /// Devuelve `false` si lo dejaría en negativo.
     pub fn adjust_matches(&mut self, now: i64, delta: i64) -> Result<bool> {
         self.store.adjust_matches(now, delta)
-    }
-
-    /// Quita el último cofre contado si es de los últimos 5 minutos.
-    /// Devuelve su tipo, o `None` si no había ninguno que se pudiera quitar.
-    pub fn undo_last_chest(&mut self, now: i64) -> Result<Option<ChestType>> {
-        match self.store.last_chest()? {
-            Some((id, at, kind)) if now - at <= UNDO_WINDOW_MS && at <= now => {
-                self.store.delete_chest(id)?;
-                Ok(Some(kind))
-            }
-            _ => Ok(None),
-        }
     }
 
     /// Cierra la sesión por inactividad. Devuelve `true` si cambió algo.
@@ -312,11 +358,8 @@ impl Tracker {
                 None => 0,
             },
             total_matches: self.store.total_matches()?.max(0) as u32,
-            last_chest: self
-                .store
-                .last_chest()?
-                .map(|(_, at, kind)| LastChest { kind, at }),
             paused: self.paused,
+            match_started_at: self.active_match.map(|_| self.match_started_at),
         })
     }
 
@@ -624,6 +667,71 @@ mod tests {
     }
 
     #[test]
+    fn la_racha_cuenta_dias_seguidos_con_el_objetivo_cumplido() {
+        let days = [
+            (10, 30),
+            (11, 35),
+            (12, 5),
+            (13, 30),
+            (14, 31),
+            (15, 40),
+            (16, 2),
+        ];
+        // Hoy (16) aún no se cumple: la racha sigue viva hasta ayer.
+        assert_eq!(
+            streak(&days, 30, 16),
+            Streak {
+                current: 3,
+                best: 3,
+                today_done: false
+            }
+        );
+        // Si hoy se cumple, cuenta también.
+        let mut with_today = days.to_vec();
+        with_today.push((16, 30));
+        assert_eq!(streak(&with_today, 30, 16).current, 4);
+        // Un día sin llegar la corta.
+        assert_eq!(streak(&days, 30, 18).current, 0);
+        assert_eq!(streak(&days, 30, 18).best, 3);
+        // Sin objetivo, sin racha.
+        assert_eq!(streak(&days, 0, 16), Streak::default());
+    }
+
+    #[test]
+    fn la_racha_usa_los_dias_locales_de_los_cofres() {
+        let mut t = tracker();
+        let mut settings = t.settings().unwrap();
+        settings.daily_goal = 2;
+        t.save_settings(&settings).unwrap();
+        // UTC-4: un cofre a las 02:00 UTC del día 1 es del día 0 en local.
+        let offset = -4 * HOUR;
+        let day1 = 24 * HOUR;
+        chest(&mut t, day1 + 2 * HOUR, ChestType::Normal);
+        chest(&mut t, day1 + 3 * HOUR, ChestType::Normal);
+        chest(&mut t, day1 + 10 * HOUR, ChestType::Normal);
+        chest(&mut t, day1 + 11 * HOUR, ChestType::Rare);
+        let s = t.streak(day1 + 12 * HOUR, offset).unwrap();
+        assert_eq!(
+            s,
+            Streak {
+                current: 2,
+                best: 2,
+                today_done: true
+            }
+        );
+    }
+
+    #[test]
+    fn el_tiempo_de_partida_solo_existe_con_una_partida_en_curso() {
+        let mut t = tracker();
+        assert_eq!(t.stats().unwrap().match_started_at, None);
+        t.match_started(5_000).unwrap();
+        assert_eq!(t.stats().unwrap().match_started_at, Some(5_000));
+        t.match_ended(9_000, EndReason::Lobby).unwrap();
+        assert_eq!(t.stats().unwrap().match_started_at, None);
+    }
+
+    #[test]
     fn en_pausa_no_se_cuenta_nada_y_al_reanudar_si() {
         let mut t = tracker();
         t.set_paused(true);
@@ -740,43 +848,5 @@ mod tests {
             (history[0].duration_ms, history[0].counts.total),
             (5 * MIN, 0)
         );
-    }
-
-    #[test]
-    fn se_puede_deshacer_el_ultimo_cofre_durante_5_minutos() {
-        let mut t = tracker();
-        t.match_started(1_000).unwrap();
-        chest(&mut t, 2_000, ChestType::Normal);
-        chest(&mut t, 3_000, ChestType::Rare);
-        assert_eq!(
-            t.stats().unwrap().last_chest,
-            Some(LastChest {
-                kind: ChestType::Rare,
-                at: 3_000
-            })
-        );
-
-        assert_eq!(
-            t.undo_last_chest(3_000 + 4 * MIN).unwrap(),
-            Some(ChestType::Rare)
-        );
-        let s = t.stats().unwrap();
-        for c in [s.match_counts, s.session_counts, s.total_counts] {
-            assert_eq!(
-                (c.normal, c.rare, c.total),
-                (1, 0, 1),
-                "se quita de todos los contadores"
-            );
-        }
-        // El anterior ya tiene más de 5 minutos: no se puede quitar.
-        assert_eq!(t.undo_last_chest(2_000 + 6 * MIN).unwrap(), None);
-        assert_eq!(t.stats().unwrap().total_counts.total, 1);
-    }
-
-    #[test]
-    fn sin_cofres_no_hay_nada_que_deshacer() {
-        let mut t = tracker();
-        assert_eq!(t.undo_last_chest(1_000).unwrap(), None);
-        assert_eq!(t.stats().unwrap().last_chest, None);
     }
 }

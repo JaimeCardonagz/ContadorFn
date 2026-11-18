@@ -12,14 +12,13 @@ Funciona tanto con **GeForce NOW** como con el **launcher directo de Fortnite**.
 - Lleva la cuenta de la **partida**, del **día** y del **total**, con el promedio de cofres por partida.
 - Detecta sola cuándo empieza y termina cada partida.
 - Muestra un **contador pequeño, solo texto y sin fondo**, en la esquina que elijas o donde lo dejes arrastrándolo. Tú decides qué enseña, con o sin colores, su tamaño y su opacidad.
-- Al terminar cada partida, el contador enseña unos segundos un **resumen**: cofres y duración.
+- Al terminar cada partida, el contador enseña unos segundos un **resumen**: cofres y duración. También puede mostrar el **tiempo de la partida** en curso.
 - El contador solo aparece con el juego delante, se adapta a la ventana y la resolución del juego, y se puede mostrar u ocultar con un **atajo de teclado**.
 - **Historial** de las partidas de las últimas 24 horas y **récords**: más cofres en una partida, partida más larga y promedio del día.
 - **Pausa** el conteo cuando quieras, desde el panel, el icono de la bandeja o con un atajo de teclado.
-- **Deshaz** el último cofre si se contó uno de más.
 - Puede **iniciarse con Windows**; al cerrar el panel, el programa sigue en la bandeja, junto al reloj. Al pasar el ratón por su icono ves los cofres de la partida y del día.
-- Guarda una **copia de seguridad** de tus estadísticas cada día y puedes **restaurarla** desde Configuración.
-- Ponte un **objetivo de cofres del día** y ve cuánto te falta, también sobre el juego.
+- Guarda una **copia de seguridad** de tus estadísticas cada día.
+- Ponte un **objetivo de cofres del día**, ve cuánto te falta (también sobre el juego) y mantén tu **racha** de días cumpliéndolo.
 - Tema **claro u oscuro**, y un panel que se adapta a su tamaño y se maneja con el teclado.
 - Si no consigue ver el juego, te lo **avisa en el panel** con una pista de qué hacer.
 - Te avisa cuando hay una versión nueva y se actualiza solo al pulsar **Actualizar**.
@@ -46,14 +45,14 @@ Después abre el juego: el contador aparecerá en la esquina y el panel se irá 
 
 | Pestaña | Para qué sirve |
 |---|---|
-| Contador | Cofres de la partida, del día (con el objetivo del día) y del total; pausar el conteo y deshacer el último cofre |
-| Estadísticas | Total de cada tipo, partidas jugadas, promedio por partida, últimos 7 días y récords |
+| Contador | Cofres de la partida, del día (con tu objetivo del día) y del total; pausar el conteo |
+| Estadísticas | Total de cada tipo, partidas jugadas, promedio por partida, últimos 7 días y récords (también la mejor racha del objetivo) |
 | Historial | Partidas de las últimas 24 horas: hora, duración y cofres |
-| Configuración | Idioma, objetivo del día, tema, inicio con Windows, contador sobre el juego, atajos de teclado, botón con el que abres los cofres, copias de seguridad, opciones avanzadas y reinicio de estadísticas |
+| Configuración | Idioma, tema, inicio con Windows, contador sobre el juego, atajos de teclado, botón con el que abres los cofres y reinicio de estadísticas |
 
 ## Privacidad
 
-Todo se queda en tu equipo. El programa no modifica el juego y no tiene cuentas ni telemetría. Su única conexión a internet es para comprobar si hay una versión nueva, y se puede desactivar en Configuración → Avanzado.
+Todo se queda en tu equipo. El programa no modifica el juego y no tiene cuentas ni telemetría. Su única conexión a internet es para comprobar si hay una versión nueva.
 
 ## Desarrollo
 

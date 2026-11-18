@@ -76,6 +76,8 @@ pub struct Settings {
     pub daily_goal: u32,
     /// Mostrar el objetivo del día en el contador sobre el juego.
     pub overlay_goal: bool,
+    /// Mostrar el tiempo de la partida en curso en el contador.
+    pub overlay_timer: bool,
     /// Destello "+1" en el contador al contar un cofre.
     pub overlay_flash: bool,
     /// Tema del panel: "dark", "light" o "system".
@@ -118,6 +120,7 @@ impl Default for Settings {
             overlay_only_in_match: false,
             daily_goal: 0,
             overlay_goal: true,
+            overlay_timer: false,
             overlay_flash: true,
             theme: "dark".into(),
             last_seen_version: String::new(),
@@ -198,6 +201,7 @@ mod tests {
                 overlay_only_in_match: true,
                 daily_goal: 30,
                 overlay_goal: false,
+                overlay_timer: true,
                 overlay_flash: false,
                 theme: "light".into(),
                 last_seen_version: "1.2.0".into(),

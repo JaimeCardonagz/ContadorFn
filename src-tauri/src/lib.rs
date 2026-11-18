@@ -100,21 +100,6 @@ fn get_stats(app: AppHandle) -> Result<Stats, String> {
     update(&app, |_, _| Ok(()))
 }
 
-#[tauri::command]
-fn start_session(app: AppHandle) -> Result<Stats, String> {
-    update(&app, |t, now| t.start_session(now, false).map(|_| ()))
-}
-
-#[tauri::command]
-fn stop_session(app: AppHandle) -> Result<Stats, String> {
-    update(&app, |t, now| t.stop_session(now))
-}
-
-#[tauri::command]
-fn new_match(app: AppHandle) -> Result<Stats, String> {
-    update(&app, |t, now| t.force_new_match(now))
-}
-
 /// Suma (o resta, con `delta` negativo) cofres al histórico a mano.
 #[tauri::command]
 fn adjust_total(app: AppHandle, chest: ChestType, delta: i64) -> Result<Stats, String> {
@@ -197,25 +182,6 @@ fn set_paused(app: AppHandle, paused: bool) -> Result<Stats, String> {
         t.set_paused(paused);
         Ok(())
     })
-}
-
-/// Quita el último cofre contado (solo si es de los últimos 5 minutos).
-#[tauri::command]
-fn undo_last_chest(app: AppHandle) -> Result<Stats, String> {
-    let mut undone = false;
-    let stats = update(&app, |t, now| {
-        undone = t.undo_last_chest(now)?.is_some();
-        Ok(())
-    })?;
-    if undone {
-        Ok(stats)
-    } else {
-        Err(tr(
-            "Ya no se puede deshacer: solo el último cofre y durante 5 minutos.",
-            "It can no longer be undone: only the last chest, within 5 minutes.",
-        )
-        .into())
-    }
 }
 
 #[tauri::command]
@@ -631,7 +597,6 @@ fn tray_label(id: &str, stats: &Stats) -> &'static str {
         "open" => tr("Abrir panel", "Open panel"),
         "pause" if stats.paused => tr("Reanudar conteo", "Resume counting"),
         "pause" => tr("Pausar conteo", "Pause counting"),
-        "new_match" => tr("Nueva partida", "New match"),
         "overlay" => tr("Mostrar u ocultar el contador", "Show or hide the counter"),
         _ => tr("Salir", "Quit"),
     }
@@ -660,7 +625,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         MenuItem::with_id(app, id, tray_label(id, &stats), true, None::<&str>)
             .map(|item| (id, item))
     };
-    let items = ["open", "pause", "new_match", "overlay", "quit"]
+    let items = ["open", "pause", "overlay", "quit"]
         .into_iter()
         .map(item)
         .collect::<tauri::Result<Vec<_>>>()?;
@@ -672,7 +637,6 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             find("open"),
             &separator,
             find("pause"),
-            find("new_match"),
             find("overlay"),
             &PredefinedMenuItem::separator(app)?,
             find("quit"),
@@ -686,9 +650,6 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_panel(app),
             "pause" => toggle_pause(app),
-            "new_match" => {
-                let _ = update(app, |t, now| t.force_new_match(now));
-            }
             "overlay" => toggle_overlay(app),
             "quit" => {
                 save_panel(app);
@@ -748,6 +709,17 @@ fn open_external(target: &std::ffi::OsStr) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Racha del objetivo diario. `offset_minutes`: lo que da la interfaz con
+/// `getTimezoneOffset()` (minutos que hay que sumar a la hora local para la UTC).
+#[tauri::command]
+fn get_streak(state: State<AppState>, offset_minutes: i32) -> Result<tracker::Streak, String> {
+    let offset_ms = -i64::from(offset_minutes.clamp(-24 * 60, 24 * 60)) * 60_000;
+    let tracker = state.0.lock().map_err(|e| e.to_string())?;
+    tracker
+        .streak(now_ms(), offset_ms)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn list_backups(dir: State<BackupDir>) -> Vec<backup::BackupFile> {
     backup::list(&dir.0)
@@ -796,17 +768,9 @@ fn open_releases() -> Result<(), String> {
     open_external(RELEASES_URL.as_ref())
 }
 
-/// Busca una versión nueva (si el usuario no lo ha desactivado).
+/// Busca una versión nueva (siempre: no se puede desactivar).
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
-    let enabled = {
-        let state = app.state::<AppState>();
-        let tracker = state.0.lock().map_err(|e| e.to_string())?;
-        tracker.settings().map_err(|e| e.to_string())?.check_updates
-    };
-    if !enabled {
-        return Ok(None);
-    }
     let found = tauri::async_runtime::spawn_blocking(updater::newer_version)
         .await
         .map_err(|e| e.to_string())??;
@@ -1240,12 +1204,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_stats,
-            start_session,
-            stop_session,
-            new_match,
             adjust_total,
             adjust_matches,
-            undo_last_chest,
             set_paused,
             initial_setup,
             is_debug,
@@ -1266,6 +1226,7 @@ pub fn run() {
             get_detection_waiting,
             fit_overlay,
             list_backups,
+            get_streak,
             restore_backup,
             get_all_matches,
             start_overlay_move,

@@ -24,8 +24,8 @@ const sample: Record<string, unknown> = {
     totalCounts: counts(4821, 366, 87),
     sessionMatches: 6,
     totalMatches: 412,
-    lastChest: { kind: "rare", at: Date.now() - 42_000 },
     paused: new URLSearchParams(location.search).get("pausa") !== null,
+    matchStartedAt: Date.now() - 754_000,
   },
   get_settings: {
     language: "es",
@@ -35,7 +35,6 @@ const sample: Record<string, unknown> = {
     showOverlay: true,
     saveSamples: false,
     diagnostics: new URLSearchParams(location.search).get("diagnostico") !== null,
-    checkUpdates: true,
     closeToTray: true,
     startWithWindows: false,
     matchSummary: true,
@@ -47,8 +46,9 @@ const sample: Record<string, unknown> = {
     overlayFlash: true,
     dailyGoal: 80,
     overlayGoal: true,
+    overlayTimer: true,
     theme: new URLSearchParams(location.search).get("tema") ?? "dark",
-    lastSeenVersion: new URLSearchParams(location.search).get("novedades") !== null ? "1.2.0" : "1.3.0",
+    lastSeenVersion: new URLSearchParams(location.search).get("novedades") !== null ? "1.3.0" : "1.4.0",
     corner: "top-left",
     setupDone: new URLSearchParams(location.search).get("inicio") === null,
     overlayMatch: "total",
@@ -90,6 +90,7 @@ const sample: Record<string, unknown> = {
   },
   get_vision_problem: "none",
   get_detection_waiting: false,
+  get_streak: { current: 3, best: 5, todayDone: false },
   list_backups: [
     { name: "estadisticas-2026-11-18.db", kind: "daily", day: "2026-11-18" },
     { name: "estadisticas-2026-11-17.db", kind: "daily", day: "2026-11-17" },
@@ -138,5 +139,5 @@ export function startDragging(): void {
 
 /** Versión instalada de la app (en el navegador, una de ejemplo). */
 export function appVersion(): Promise<string> {
-  return inTauri ? getVersion() : Promise.resolve("1.3.0");
+  return inTauri ? getVersion() : Promise.resolve("1.4.0");
 }

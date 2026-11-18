@@ -182,6 +182,15 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Versión 1.4.0 (2026-11-18)
+
+- Fuera **Copiar resumen**, **Deshacer el último cofre** y los botones **Iniciar**, **Detener** y **Nueva partida** (también "Nueva partida" del menú de la bandeja). La sesión del día se abre y se cierra sola; el Contador solo ofrece **Pausar conteo**.
+- El **objetivo de cofres del día** se edita en la tarjeta "Hoy" del Contador.
+- **Buscar versiones nuevas** siempre activo (el ajuste `checkUpdates` se ignora).
+- La parte **Avanzado** (copias de seguridad y restaurar) pasa a la pestaña Diagnóstico; en Configuración solo queda el interruptor "Habilitar manejo de diagnósticos".
+- **Racha del objetivo diario** (`get_streak`, `tracker::streak`): días locales seguidos con al menos `dailyGoal` cofres contados, con el objetivo actual. La interfaz manda su `getTimezoneOffset()` para agrupar por día local. Se ve en la tarjeta Hoy y como "Mejor racha del objetivo" en Récords.
+- **Tiempo de la partida** en el contador (`overlayTimer`, apagado por defecto), con `Stats.matchStartedAt`.
+
 ### Versión 1.3.0 (2026-11-18)
 
 Otras dieciséis mejoras:

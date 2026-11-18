@@ -13,6 +13,8 @@
       sessionMatches: number;
       totalMatches: number;
       paused?: boolean;
+      inMatch?: boolean;
+      matchStartedAt?: number | null;
     };
     options: {
       overlayMatch: string;
@@ -23,6 +25,7 @@
       overlayOpacity: number;
       dailyGoal?: number;
       overlayGoal?: boolean;
+      overlayTimer?: boolean;
     };
     t: (typeof texts)["es"];
     right?: boolean;
@@ -32,8 +35,19 @@
     areaHeight?: number;
     /** Cofre recién contado, para el destello "+1". */
     flash?: { kind: "normal" | "rare" | "spirit"; id: number } | null;
+    /** Hora actual (epoch ms), para el tiempo de partida. */
+    now?: number;
   };
-  let { stats, options, t, right = false, summary = null, areaHeight = 1080, flash = null }: Props = $props();
+  let { stats, options, t, right = false, summary = null, areaHeight = 1080, flash = null, now = Date.now() }: Props =
+    $props();
+  /** "12:34" (o "1:02:03" si pasa de una hora). */
+  function elapsed(since: number) {
+    const s = Math.max(0, Math.floor((now - since) / 1000));
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const h = Math.floor(s / 3600);
+    const m = Math.floor(s / 60) % 60;
+    return h > 0 ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+  }
   const sizes: Record<string, number> = { small: 13, medium: 15, large: 19 };
   // Automático: 15 px a 1080 de alto, proporcional, entre 12 y 24.
   const fontSize = $derived(
@@ -73,6 +87,9 @@
   {/if}
   {#if options.overlayTotal}
     <p>{t.overlayTotal} <b>{stats.totalCounts.total}</b></p>
+  {/if}
+  {#if options.overlayTimer && stats.inMatch && stats.matchStartedAt}
+    <p>{t.overlayTime} <b>{elapsed(stats.matchStartedAt)}</b></p>
   {/if}
   {#if options.overlayGoal && options.dailyGoal && stats.sessionCounts}
     {@const done = stats.sessionCounts.total}

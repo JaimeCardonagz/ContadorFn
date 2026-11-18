@@ -16,8 +16,8 @@
     totalCounts: Counts;
     sessionMatches: number;
     totalMatches: number;
-    lastChest: { kind: string; at: number } | null;
     paused: boolean;
+    matchStartedAt: number | null;
   };
 
   type Diag = {
@@ -57,7 +57,6 @@
     setupDone: boolean;
     saveSamples: boolean;
     diagnostics: boolean;
-    checkUpdates: boolean;
     closeToTray: boolean;
     startWithWindows: boolean;
     matchSummary: boolean;
@@ -67,6 +66,7 @@
     overlayFlash: boolean;
     dailyGoal: number;
     overlayGoal: boolean;
+    overlayTimer: boolean;
     theme: string;
     lastSeenVersion: string;
     overlayX: number;
@@ -204,20 +204,19 @@
   // ¿Está el programa analizando el juego o esperando a que esté delante?
   let waiting = $state(true);
 
-  // Copiar al portapapeles un resumen del día, para compartirlo.
-  let copied = $state(false);
-  async function copySummary() {
-    if (!stats) return;
-    const c = stats.sessionCounts;
-    const text = t.copyText(c.total, c.normal, c.rare, c.spirit, stats.sessionMatches, stats.totalCounts.total);
-    try {
-      await navigator.clipboard.writeText(text);
-      copied = true;
-      setTimeout(() => (copied = false), 2000);
-    } catch (e) {
-      error = String(e);
-    }
-  }
+  // Racha del objetivo diario (días seguidos llegando al objetivo).
+  type Streak = { current: number; best: number; todayDone: boolean };
+  let streak = $state<Streak | null>(null);
+  const loadStreak = () =>
+    invoke<Streak>("get_streak", { offsetMinutes: new Date().getTimezoneOffset() })
+      .then((value) => (streak = value))
+      .catch(() => {});
+  $effect(() => {
+    // Se recalcula al cambiar de pestaña, de objetivo o de cofres.
+    void settings?.dailyGoal;
+    void stats?.totalCounts.total;
+    if (tab === "counter" || tab === "stats") loadStreak();
+  });
 
   // Últimos 7 días (Estadísticas) y exportar partidas (Historial).
   let allMatches = $state<Summary[] | null>(null);
@@ -315,7 +314,7 @@
     // versión nueva cada 6 horas.
     const updateTimer = setInterval(
       () => {
-        if (settings?.checkUpdates && !update) {
+        if (!update) {
           invoke<string | null>("check_update")
             .then((value) => (update = value))
             .catch(() => {});
@@ -331,11 +330,9 @@
       // La primera vez se guarda el idioma del sistema, para que el backend
       // genere sus mensajes en el mismo idioma que la interfaz.
       if (!value.language) save({ language: lang });
-      if (value.checkUpdates) {
-        invoke<string | null>("check_update")
-          .then((version) => (update = version))
-          .catch(() => {});
-      }
+      invoke<string | null>("check_update")
+        .then((version) => (update = version))
+        .catch(() => {});
     });
     const listeners = [
       listen<Stats>("stats-changed", (event) => {
@@ -415,14 +412,6 @@
     // terminando de pintar y el foco se perdería.
     setTimeout(() => node.focus(), 50);
   }
-
-  // Deshacer el último cofre: solo si es de los últimos 5 minutos.
-  const UNDO_WINDOW_MS = 5 * 60 * 1000;
-  let confirmingUndo = $state(false);
-  const undoable = $derived(stats?.lastChest && now - stats.lastChest.at <= UNDO_WINDOW_MS ? stats.lastChest : null);
-  $effect(() => {
-    if (!undoable) confirmingUndo = false;
-  });
 
   // Reiniciar: pide confirmación y vuelve a la pantalla inicial.
   let confirmingReset = $state(false);
@@ -529,7 +518,7 @@
   type BackupInfo = { count: number; latest: string | null };
   let backups = $state<BackupInfo | null>(null);
   $effect(() => {
-    if (tab === "settings") invoke<BackupInfo>("backup_info").then((value) => (backups = value)).catch(() => {});
+    if (tab === "diag") invoke<BackupInfo>("backup_info").then((value) => (backups = value)).catch(() => {});
   });
   /** "2026-11-18" → "18 nov", con la fecha local (sin desfase por zona horaria). */
   const backupDay = (iso: string) => {
@@ -761,6 +750,27 @@
       </div>
       {@render chips(stats.sessionCounts)}
       <small class="linea">{t.matches}: {stats.sessionMatches}</small>
+      {#if settings}
+        <div class="opcion meta-dia">
+          <label for="objetivo">{t.dailyGoal}<Help text={t.help.dailyGoal} /></label>
+          <input
+            id="objetivo"
+            class="numero"
+            type="number"
+            min="0"
+            max="999"
+            step="1"
+            inputmode="numeric"
+            placeholder="—"
+            value={settings.dailyGoal || ""}
+            onchange={(e) => {
+              const goal = Math.min(999, Math.max(0, Math.trunc(Number(e.currentTarget.value) || 0)));
+              e.currentTarget.value = goal ? String(goal) : "";
+              save({ dailyGoal: goal });
+            }}
+          />
+        </div>
+      {/if}
       {#if settings && settings.dailyGoal > 0}
         {@const goal = settings.dailyGoal}
         {@const done = stats.sessionCounts.total}
@@ -776,6 +786,9 @@
             <span style:width="{Math.min(100, (done / goal) * 100)}%"></span>
           </div>
           <small>{done >= goal ? t.goalReached(done, goal) : t.goalProgress(done, goal)}</small>
+          {#if streak && streak.current > 0}
+            <small class="racha">{t.streakNow(streak.current, streak.todayDone)}</small>
+          {/if}
         </div>
       {/if}
     </section>
@@ -786,38 +799,12 @@
       <small class="linea">{t.matches}: {stats.totalMatches}</small>
     </section>
 
-    <nav>
-      <button onclick={() => run("start_session")} disabled={stats.sessionActive}>{t.start}</button>
-      <button onclick={() => run("stop_session")} disabled={!stats.sessionActive}>{t.stop}</button>
-      <button onclick={() => run("new_match")} disabled={stats.paused}>{t.newMatch}</button>
-      {#if !stats.paused}
+    {#if !stats.paused}
+      <nav>
         <button onclick={() => run("set_paused", { paused: true })}>{t.pause}</button>
-      {/if}
-      <button onclick={copySummary} aria-live="polite">{copied ? t.copied : t.copySummary}</button>
-    </nav>
-
-    {#if undoable}
-      <section class="deshacer">
-        {#if confirmingUndo}
-          <span>{t.undoConfirm(t.kindNames[undoable.kind] ?? undoable.kind)}</span>
-          <span class="botones">
-            <button
-              class="peligro"
-              onclick={() => {
-                confirmingUndo = false;
-                run("undo_last_chest");
-              }}
-            >
-              {t.undoYes}
-            </button>
-            <button onclick={() => (confirmingUndo = false)}>{t.cancel}</button>
-          </span>
-        {:else}
-          <span>{t.lastCounted(t.kindNames[undoable.kind] ?? undoable.kind, Math.max(0, Math.round((now - undoable.at) / 1000)))}</span>
-          <button onclick={() => (confirmingUndo = true)}>{t.undo}</button>
-        {/if}
-      </section>
+      </nav>
     {/if}
+
   </div>
   {/if}
 
@@ -889,6 +876,15 @@
               {#if longest}<small>{day(longest.startedAt)} · {t.summaryChests(longest.counts.total, true)}</small>{/if}
             </dd>
           </div>
+          {#if settings && settings.dailyGoal > 0 && streak}
+            <div>
+              <dt>{t.recordStreak}<Help text={t.help.recordStreak} /></dt>
+              <dd>
+                <b>{streak.best > 0 ? t.days(streak.best) : "—"}</b>
+                {#if streak.current > 0}<small>{t.streakCurrent(streak.current)}</small>{/if}
+              </dd>
+            </div>
+          {/if}
           <div>
             <dt>{t.recordDayAverage}<Help text={t.help.recordDayAverage} /></dt>
             <dd>
@@ -952,25 +948,6 @@
           onchange={(e) => save({ startWithWindows: e.currentTarget.checked })}
         />
       </label>
-      <div class="opcion">
-        <label for="objetivo">{t.dailyGoal}<Help text={t.help.dailyGoal} /></label>
-        <input
-          id="objetivo"
-          class="numero"
-          type="number"
-          min="0"
-          max="999"
-          step="1"
-          inputmode="numeric"
-          placeholder="0"
-          value={settings.dailyGoal || ""}
-          onchange={(e) => {
-            const goal = Math.min(999, Math.max(0, Math.trunc(Number(e.currentTarget.value) || 0)));
-            e.currentTarget.value = goal ? String(goal) : "";
-            save({ dailyGoal: goal });
-          }}
-        />
-      </div>
       <div class="opcion">
         <span>{t.theme}</span>
         <select value={settings.theme} onchange={(e) => save({ theme: e.currentTarget.value })}>
@@ -1054,6 +1031,14 @@
           />
         </label>
       {/if}
+      <label class="opcion">
+        <span>{t.optTimer}<Help text={t.help.optTimer} /></span>
+        <input
+          type="checkbox"
+          checked={settings.overlayTimer}
+          onchange={(e) => save({ overlayTimer: e.currentTarget.checked })}
+        />
+      </label>
       <label class="opcion">
         <span>{t.optFlash}<Help text={t.help.optFlash} /></span>
         <input
@@ -1166,15 +1151,6 @@
     </section>
 
     <section>
-      <div class="fila"><span>{t.advanced}</span></div>
-      <label class="opcion">
-        <span>{t.checkUpdates}<Help text={t.help.checkUpdates} /></span>
-        <input
-          type="checkbox"
-          checked={settings.checkUpdates}
-          onchange={(e) => save({ checkUpdates: e.currentTarget.checked })}
-        />
-      </label>
       <label class="opcion">
         <span>{t.diagnosticsToggle}<Help text={t.help.diagnostics} /></span>
         <input
@@ -1183,36 +1159,6 @@
           onchange={(e) => save({ diagnostics: e.currentTarget.checked })}
         />
       </label>
-      <div class="opcion">
-        <span>{t.backups}<Help text={t.help.backups} /></span>
-        <span class="botones">
-          {#if backups}
-            <small>{backups.latest ? t.backupsSummary(backups.count, backupDay(backups.latest)) : t.backupsNone}</small>
-          {/if}
-          <button onclick={() => invoke("open_backups_dir").catch((e) => (error = String(e)))}>{t.openFolder}</button>
-          <button onclick={openRestore} disabled={backupFiles !== null}>{t.restore}</button>
-        </span>
-      </div>
-      {#if backupFiles}
-        {#if backupFiles.length}
-          <div class="opcion">
-            <label for="copia">{t.restoreWhich}</label>
-            <select id="copia" bind:value={restoreChoice}>
-              {#each backupFiles as file (file.name)}
-                <option value={file.name}>{backupLabel(file)}</option>
-              {/each}
-            </select>
-          </div>
-          <p class="nota-mover" role="note">{t.restoreWarning}</p>
-          <nav class="botones">
-            <button class="peligro" onclick={restoreBackup}>{t.restoreConfirm}</button>
-            <button onclick={() => (backupFiles = null)}>{t.cancel}</button>
-          </nav>
-        {:else}
-          <p class="nota">{t.backupsNone}</p>
-        {/if}
-      {/if}
-      {#if restoreDone}<p class="nota" role="status">{t.restoreDone}</p>{/if}
     </section>
 
     <section>
@@ -1246,6 +1192,40 @@
 
   {#if tab === "diag" && diag}
   <div class="pestana pestana-diag" role="tabpanel" id="panel-diag" aria-labelledby="tab-diag" tabindex="-1">
+    <section>
+      <div class="fila"><span>{t.advanced}</span></div>
+      <div class="opcion">
+        <span>{t.backups}<Help text={t.help.backups} /></span>
+        <span class="botones">
+          {#if backups}
+            <small>{backups.latest ? t.backupsSummary(backups.count, backupDay(backups.latest)) : t.backupsNone}</small>
+          {/if}
+          <button onclick={() => invoke("open_backups_dir").catch((e) => (error = String(e)))}>{t.openFolder}</button>
+          <button onclick={openRestore} disabled={backupFiles !== null}>{t.restore}</button>
+        </span>
+      </div>
+      {#if backupFiles}
+        {#if backupFiles.length}
+          <div class="opcion">
+            <label for="copia">{t.restoreWhich}</label>
+            <select id="copia" bind:value={restoreChoice}>
+              {#each backupFiles as file (file.name)}
+                <option value={file.name}>{backupLabel(file)}</option>
+              {/each}
+            </select>
+          </div>
+          <p class="nota-mover" role="note">{t.restoreWarning}</p>
+          <nav class="botones">
+            <button class="peligro" onclick={restoreBackup}>{t.restoreConfirm}</button>
+            <button onclick={() => (backupFiles = null)}>{t.cancel}</button>
+          </nav>
+        {:else}
+          <p class="nota">{t.backupsNone}</p>
+        {/if}
+      {/if}
+      {#if restoreDone}<p class="nota" role="status">{t.restoreDone}</p>{/if}
+    </section>
+
     <section>
       <div class="fila"><span>{t.detection}</span></div>
       {#if diag.detectError}
@@ -1554,7 +1534,12 @@
   }
 
   .objetivo {
-    margin-top: 8px;
+    margin-top: 4px;
+  }
+
+  .meta-dia {
+    margin-top: 6px;
+    min-height: 36px;
   }
 
   .barra {
@@ -1580,6 +1565,11 @@
     display: block;
     margin-top: 4px;
     font-size: 12px;
+  }
+
+  .objetivo .racha {
+    color: var(--warn);
+    font-weight: 600;
   }
 
   .objetivo.cumplido small {
@@ -1978,14 +1968,6 @@
     line-height: 1;
   }
 
-  .deshacer {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px 12px;
-    font-size: 14px;
-  }
 
   .historial {
     display: flex;

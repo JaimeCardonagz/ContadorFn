@@ -13,6 +13,8 @@
     sessionMatches: number;
     totalMatches: number;
     paused?: boolean;
+    inMatch: boolean;
+    matchStartedAt: number | null;
   };
   type Settings = {
     language: string;
@@ -29,6 +31,7 @@
     overlayFlash: boolean;
     dailyGoal: number;
     overlayGoal: boolean;
+    overlayTimer: boolean;
   };
 
   let stats = $state<Stats | null>(null);
@@ -61,6 +64,15 @@
   const custom = $derived(settings?.corner === "custom");
   const right = $derived(!!settings && (settings.corner.endsWith("right") || (custom && settings.overlayX > 500)));
   const bottom = $derived(!!settings && (settings.corner.startsWith("bottom") || (custom && settings.overlayY > 500)));
+
+  // Hora actual para el tiempo de partida: solo avanza si se muestra.
+  let now = $state(Date.now());
+  $effect(() => {
+    if (!settings?.overlayTimer || !stats?.inMatch) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
 
   // Alto de la zona del juego (tamaño automático del texto).
   let areaHeight = $state(1080);
@@ -132,7 +144,7 @@
   >
     <div class="contenido" bind:this={content}>
       {#if moving}<span class="pista">{texts[lang].moveDrag}</span>{/if}
-      <OverlayText {stats} {summary} {areaHeight} {flash} options={settings} t={texts[lang]} right={right && !moving} />
+      <OverlayText {stats} {summary} {areaHeight} {flash} {now} options={settings} t={texts[lang]} right={right && !moving} />
     </div>
   </main>
 {/if}

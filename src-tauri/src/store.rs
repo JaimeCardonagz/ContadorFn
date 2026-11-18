@@ -27,6 +27,8 @@ pub enum EndReason {
     Eliminated,
     Victory,
     Lobby,
+    /// Partida cerrada a mano (versiones anteriores; hoy solo en pruebas).
+    #[cfg_attr(not(test), allow(dead_code))]
     Manual,
 }
 
@@ -436,34 +438,18 @@ impl Store {
         self.top_match("duration DESC")
     }
 
-    /// El último cofre contado: (id, instante, tipo).
-    pub fn last_chest(&self) -> Result<Option<(i64, i64, ChestType)>> {
-        use rusqlite::OptionalExtension;
-        let row: Option<(i64, i64, String)> = self
-            .conn
-            .query_row(
-                "SELECT id, ts, chest_type FROM chest_events
-                 WHERE chest_type IN ('normal', 'rare', 'spirit')
-                 ORDER BY id DESC LIMIT 1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()?;
-        Ok(row.and_then(|(id, ts, kind)| {
-            let kind = match kind.as_str() {
-                "normal" => ChestType::Normal,
-                "rare" => ChestType::Rare,
-                "spirit" => ChestType::Spirit,
-                _ => return None,
-            };
-            Some((id, ts, kind))
-        }))
-    }
-
-    pub fn delete_chest(&self, id: i64) -> Result<()> {
+    /// Cofres contados por día local: (número de día, cofres). `offset_ms`
+    /// es la diferencia de la hora local con la UTC.
+    pub fn chests_per_day(&self, offset_ms: i64) -> Result<Vec<(i64, u32)>> {
         self.conn
-            .execute("DELETE FROM chest_events WHERE id = ?1", params![id])?;
-        Ok(())
+            .prepare_cached(
+                "SELECT (ts + ?1) / 86400000 - ((ts + ?1) % 86400000 < 0) AS day, COUNT(*)
+                 FROM chest_events
+                 WHERE chest_type IN ('normal', 'rare', 'spirit')
+                 GROUP BY day",
+            )?
+            .query_map(params![offset_ms], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
     }
 
     pub fn matches_in_session(&self, session_id: i64) -> Result<u32> {
