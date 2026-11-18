@@ -6,7 +6,14 @@
 
   type Counts = { normal: number; rare: number; spirit: number; total: number };
   type Props = {
-    stats: { matchCounts: Counts; totalCounts: Counts; sessionMatches: number; totalMatches: number; paused?: boolean };
+    stats: {
+      matchCounts: Counts;
+      totalCounts: Counts;
+      sessionCounts?: Counts;
+      sessionMatches: number;
+      totalMatches: number;
+      paused?: boolean;
+    };
     options: {
       overlayMatch: string;
       overlayTotal: boolean;
@@ -14,23 +21,41 @@
       overlayColor: boolean;
       overlaySize: string;
       overlayOpacity: number;
+      dailyGoal?: number;
+      overlayGoal?: boolean;
     };
     t: (typeof texts)["es"];
     right?: boolean;
     /** Si viene, se muestra el resumen de la partida que acaba de terminar. */
     summary?: { durationMs: number; counts: Counts } | null;
+    /** Alto de la zona del juego en píxeles lógicos (para el tamaño automático). */
+    areaHeight?: number;
+    /** Cofre recién contado, para el destello "+1". */
+    flash?: { kind: "normal" | "rare" | "spirit"; id: number } | null;
   };
-  let { stats, options, t, right = false, summary = null }: Props = $props();
+  let { stats, options, t, right = false, summary = null, areaHeight = 1080, flash = null }: Props = $props();
   const sizes: Record<string, number> = { small: 13, medium: 15, large: 19 };
+  // Automático: 15 px a 1080 de alto, proporcional, entre 12 y 24.
+  const fontSize = $derived(
+    options.overlaySize === "auto"
+      ? Math.min(24, Math.max(12, Math.round((15 * areaHeight) / 1080)))
+      : (sizes[options.overlaySize] ?? 15),
+  );
+  const flashClass = { normal: "tesoro", rare: "raro", spirit: "espiritu" } as const;
 </script>
 
 <div
   class:right
   class:color={options.overlayColor}
-  style:font-size="{sizes[options.overlaySize] ?? 15}px"
+  style:font-size="{fontSize}px"
   style:opacity={options.overlayOpacity / 100}
 >
   {#if stats.paused}<p class="pausa">⏸ {t.overlayPaused}</p>{/if}
+  {#if flash}
+    {#key flash.id}
+      <p class="destello {flashClass[flash.kind]}">+1 {({ normal: t.treasure, rare: t.rare, spirit: t.spirit })[flash.kind]}</p>
+    {/key}
+  {/if}
   {#if summary}
     <p>{t.summaryTitle}</p>
     <p><b>{summary.counts.total}</b> {t.summaryChests(summary.counts.total)} · {clock(summary.durationMs)}</p>
@@ -48,6 +73,12 @@
   {/if}
   {#if options.overlayTotal}
     <p>{t.overlayTotal} <b>{stats.totalCounts.total}</b></p>
+  {/if}
+  {#if options.overlayGoal && options.dailyGoal && stats.sessionCounts}
+    {@const done = stats.sessionCounts.total}
+    <p class:meta={done >= options.dailyGoal}>
+      {t.overlayGoal} <b>{done}/{options.dailyGoal}</b>{#if done >= options.dailyGoal} ✓{/if}
+    </p>
   {/if}
   {#if options.overlayChests === "sum"}
     <p>{t.overlayThis} <b>{stats.matchCounts.total}</b></p>
@@ -105,5 +136,50 @@
   }
   .pausa {
     color: #fbbf24;
+  }
+
+  .color .meta {
+    color: #86efac;
+  }
+
+  /* "+1" al contar un cofre: aparece con un pequeño salto y se desvanece. */
+  .destello {
+    font-weight: 700;
+    animation: destello 1.6s ease-out forwards;
+  }
+
+  .destello.tesoro {
+    color: #fbbf24;
+  }
+
+  .destello.raro {
+    color: #7dd3fc;
+  }
+
+  .destello.espiritu {
+    color: #f0abfc;
+  }
+
+  @keyframes destello {
+    0% {
+      opacity: 0;
+      transform: translateY(4px) scale(0.9);
+    }
+    15% {
+      opacity: 1;
+      transform: none;
+    }
+    75% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .destello {
+      animation: none;
+    }
   }
 </style>

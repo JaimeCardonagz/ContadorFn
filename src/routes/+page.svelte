@@ -62,6 +62,13 @@
     startWithWindows: boolean;
     matchSummary: boolean;
     overlayHotkey: string;
+    pauseHotkey: string;
+    overlayOnlyInMatch: boolean;
+    overlayFlash: boolean;
+    dailyGoal: number;
+    overlayGoal: boolean;
+    theme: string;
+    lastSeenVersion: string;
     overlayX: number;
     overlayY: number;
     overlayMatch: string;
@@ -83,7 +90,7 @@
   let tab = $state<Tab>("counter");
 
   // Historial de las últimas 24 h: solo duración y cofres de cada partida.
-  type Summary = { id: number; durationMs: number; counts: Counts };
+  type Summary = { id: number; startedAt: number; durationMs: number; counts: Counts };
   let history = $state<Summary[] | null>(null);
   const loadHistory = () =>
     invoke<Summary[]>("get_history")
@@ -111,6 +118,51 @@
   });
   const day = (ms: number) =>
     new Date(ms).toLocaleDateString(lang === "en" ? "en-US" : "es-MX", { day: "numeric", month: "short" });
+
+  // Pestañas: flechas izquierda/derecha, Inicio y Fin entre ellas (como en
+  // cualquier lista de pestañas) y Ctrl+1…5 desde cualquier sitio.
+  const visibleTabs = $derived(
+    (["counter", "stats", "history", "settings", "diag"] as const).filter((name) => name !== "diag" || settings?.diagnostics),
+  );
+  function goToTab(index: number, focus = true) {
+    const list = visibleTabs;
+    const next = list[(index + list.length) % list.length];
+    tab = next;
+    if (focus) setTimeout(() => document.getElementById(`tab-${next}`)?.focus(), 0);
+  }
+  function tabKey(event: KeyboardEvent) {
+    const current = visibleTabs.indexOf(tab);
+    const moves: Record<string, number> = { ArrowRight: current + 1, ArrowLeft: current - 1, Home: 0, End: visibleTabs.length - 1 };
+    if (event.key in moves) {
+      event.preventDefault();
+      goToTab(moves[event.key]);
+    }
+  }
+  function globalKey(event: KeyboardEvent) {
+    if (capturing || capturingHotkey) return;
+    if (event.ctrlKey && !event.altKey && /^[1-5]$/.test(event.key)) {
+      const index = Number(event.key) - 1;
+      if (index < visibleTabs.length) {
+        event.preventDefault();
+        goToTab(index);
+      }
+    }
+  }
+
+  // Tema del panel: oscuro, claro o el de Windows.
+  let systemLight = $state(false);
+  $effect(() => {
+    const query = window.matchMedia("(prefers-color-scheme: light)");
+    systemLight = query.matches;
+    const change = (e: MediaQueryListEvent) => (systemLight = e.matches);
+    query.addEventListener("change", change);
+    return () => query.removeEventListener("change", change);
+  });
+  $effect(() => {
+    const choice = settings?.theme ?? "dark";
+    const light = choice === "light" || (choice === "system" && systemLight);
+    document.documentElement.dataset.theme = light ? "light" : "dark";
+  });
 
   // Sin modo diagnóstico no hay pestaña Diagnóstico.
   $effect(() => {
@@ -146,6 +198,91 @@
   );
   const t = $derived(texts[lang]);
 
+  const locale = $derived(lang === "en" ? "en-US" : "es-MX");
+  const hourOf = (ms: number) => new Date(ms).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+
+  // ¿Está el programa analizando el juego o esperando a que esté delante?
+  let waiting = $state(true);
+
+  // Copiar al portapapeles un resumen del día, para compartirlo.
+  let copied = $state(false);
+  async function copySummary() {
+    if (!stats) return;
+    const c = stats.sessionCounts;
+    const text = t.copyText(c.total, c.normal, c.rare, c.spirit, stats.sessionMatches, stats.totalCounts.total);
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+      setTimeout(() => (copied = false), 2000);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // Últimos 7 días (Estadísticas) y exportar partidas (Historial).
+  let allMatches = $state<Summary[] | null>(null);
+  const loadAllMatches = () =>
+    invoke<Summary[]>("get_all_matches")
+      .then((value) => (allMatches = value))
+      .catch((e) => (error = String(e)));
+  $effect(() => {
+    if (tab === "stats") loadAllMatches();
+  });
+  const dayKey = (ms: number) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const lastDays = $derived.by(() => {
+    const days: { key: string; label: string; matches: number; chests: number }[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      const label = i === 0 ? t.today2 : i === 1 ? t.yesterday : date.toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
+      days.push({ key: dayKey(date.getTime()), label, matches: 0, chests: 0 });
+    }
+    for (const match of allMatches ?? []) {
+      const day = days.find((d) => d.key === dayKey(match.startedAt));
+      if (day) {
+        day.matches += 1;
+        day.chests += match.counts.total;
+      }
+    }
+    return days.filter((d) => d.matches > 0);
+  });
+
+  // Restaurar una copia de seguridad.
+  type BackupFile = { name: string; kind: string; day: string | null };
+  let backupFiles = $state<BackupFile[] | null>(null);
+  let restoreChoice = $state("");
+  let restoreDone = $state(false);
+  async function openRestore() {
+    restoreDone = false;
+    backupFiles = await invoke<BackupFile[]>("list_backups").catch(() => []);
+    restoreChoice = backupFiles[0]?.name ?? "";
+  }
+  async function restoreBackup() {
+    if (!restoreChoice) return;
+    try {
+      stats = await invoke<Stats>("restore_backup", { name: restoreChoice });
+      backupFiles = null;
+      restoreDone = true;
+      error = "";
+      invoke<BackupInfo>("backup_info").then((value) => (backups = value)).catch(() => {});
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  const backupLabel = (file: BackupFile) =>
+    file.kind === "daily" && file.day ? backupDay(file.day) : file.kind === "reset" ? t.backupBeforeReset : t.backupBeforeRestore;
+
+  // Novedades: tras actualizar, una vez por versión.
+  const showWhatsNew = $derived(
+    !!settings && settings.setupDone && version !== "" && settings.lastSeenVersion !== version,
+  );
+
+
   async function run(command: string, args?: Record<string, unknown>) {
     try {
       stats = await invoke<Stats>(command, args);
@@ -171,6 +308,21 @@
     invoke<Problem>("get_vision_problem")
       .then((value) => (problem = value))
       .catch(() => {});
+    invoke<boolean>("get_detection_waiting")
+      .then((value) => (waiting = value))
+      .catch(() => {});
+    // El programa puede pasar días en la bandeja: se vuelve a mirar si hay
+    // versión nueva cada 6 horas.
+    const updateTimer = setInterval(
+      () => {
+        if (settings?.checkUpdates && !update) {
+          invoke<string | null>("check_update")
+            .then((value) => (update = value))
+            .catch(() => {});
+        }
+      },
+      6 * 60 * 60 * 1000,
+    );
     appVersion().then((value) => (version = value));
     invoke<boolean>("is_debug").then((value) => (debug = value));
     invoke<Diag>("get_diag").then((value) => (diag = value));
@@ -194,6 +346,7 @@
       // El atajo global cambia "Mostrar contador" sin pasar por el panel.
       listen<Settings>("settings-changed", (event) => (settings = event.payload)),
       listen<Problem>("vision-problem", (event) => (problem = event.payload)),
+      listen<boolean>("detection-waiting", (event) => (waiting = event.payload)),
       listen<boolean>("overlay-moving", (event) => (movingOverlay = event.payload)),
       listen<Diag>("diag-state", (event) => (diag = event.payload)),
       listen<string>("diag-thumbnail", (event) => (thumbnail = event.payload)),
@@ -202,6 +355,7 @@
     return () => {
       for (const listener of listeners) listener.then((stop) => stop());
       clearInterval(timer);
+      clearInterval(updateTimer);
     };
   });
 
@@ -244,7 +398,7 @@
       matches: setupValue(initial.matches),
     });
     if (!error) {
-      await save({ setupDone: true });
+      await save({ setupDone: true, lastSeenVersion: settings?.lastSeenVersion || version });
       setupStep = "form";
     }
   }
@@ -304,7 +458,9 @@
   }
 
   // Atajo global para mostrar u ocultar el contador, como "Ctrl+Shift+KeyO".
-  let capturingHotkey = $state(false);
+  type HotkeyField = "overlayHotkey" | "pauseHotkey";
+  let capturingHotkey = $state<HotkeyField | null>(null);
+  let hotkeyHintFor = $state<HotkeyField | null>(null);
   let hotkeyHint = $state("");
   const MODIFIER_KEYS = ["Control", "Shift", "Alt", "Meta", "AltGraph"];
 
@@ -312,16 +468,18 @@
   const hotkeyParts = (accel: string) =>
     accel.split("+").map((part) => part.replace(/^Key/, "").replace(/^Digit/, ""));
 
-  function startHotkeyCapture() {
+  function startHotkeyCapture(field: HotkeyField) {
     hotkeyHint = "";
-    setTimeout(() => (capturingHotkey = true), 200);
+    hotkeyHintFor = field;
+    setTimeout(() => (capturingHotkey = field), 200);
   }
 
   async function captureHotkey(event: KeyboardEvent) {
     if (!capturingHotkey || !settings) return;
+    const field = capturingHotkey;
     event.preventDefault();
     if (event.key === "Escape") {
-      capturingHotkey = false;
+      capturingHotkey = null;
       return;
     }
     if (MODIFIER_KEYS.includes(event.key)) return; // falta la tecla principal
@@ -348,19 +506,20 @@
     ]
       .filter(Boolean)
       .join("+");
-    capturingHotkey = false;
-    await saveHotkey(accel);
+    capturingHotkey = null;
+    await saveHotkey(field, accel);
   }
 
   /** Guarda el atajo; si el sistema lo rechaza (otro programa lo usa), vuelve al anterior. */
-  async function saveHotkey(accel: string) {
+  async function saveHotkey(field: HotkeyField, accel: string) {
     if (!settings) return;
-    const previous = settings.overlayHotkey;
-    await save({ overlayHotkey: accel });
+    const previous = settings[field];
+    hotkeyHintFor = field;
+    await save({ [field]: accel });
     if (error) {
       hotkeyHint = error;
       error = "";
-      settings = { ...settings, overlayHotkey: previous };
+      settings = { ...settings, [field]: previous };
     } else {
       hotkeyHint = "";
     }
@@ -404,12 +563,43 @@
 
 <svelte:window
   onkeydown={(event) => {
+    globalKey(event);
     captureHotkey(event);
     captureKey(event);
   }}
   onmousedowncapture={captureMouse}
   oncontextmenu={(event) => event.preventDefault()}
 />
+
+{#snippet hotkeyRow(field: HotkeyField, label: string, help: string)}
+  {#if settings}
+    <div class="opcion">
+      <span>{label}<Help text={help} /></span>
+      <span class="atajo" aria-live="polite">
+        {#if capturingHotkey === field}
+          <em>{t.hotkeyPress}</em>
+        {:else if settings[field]}
+          {#each hotkeyParts(settings[field]) as part, i}
+            {#if i > 0}<span aria-hidden="true">+</span>{/if}<kbd>{part}</kbd>
+          {/each}
+        {:else}
+          <em>{t.hotkeyNone}</em>
+        {/if}
+      </span>
+    </div>
+    <nav class="botones">
+      <button onclick={() => startHotkeyCapture(field)} disabled={capturingHotkey !== null}>
+        {settings[field] ? t.changeKey : t.hotkeyAssign}
+      </button>
+      {#if capturingHotkey === field}
+        <button onclick={() => (capturingHotkey = null)}>{t.cancel}</button>
+      {:else if settings[field]}
+        <button onclick={() => saveHotkey(field, "")}>{t.hotkeyRemove}</button>
+      {/if}
+    </nav>
+    {#if hotkeyHint && hotkeyHintFor === field}<p class="aviso-atajo" role="alert">{hotkeyHint}</p>{/if}
+  {/if}
+{/snippet}
 
 {#snippet chips(c: Counts)}
   <div class="chips">
@@ -505,6 +695,18 @@
     </div>
   {/if}
 
+  {#if showWhatsNew}
+    <section class="novedades" aria-labelledby="titulo-novedades">
+      <div class="fila"><span id="titulo-novedades">{t.whatsNewTitle(version)}</span></div>
+      <ul>
+        {#each t.whatsNew as item}<li>{item}</li>{/each}
+      </ul>
+      <nav class="botones">
+        <button class="principal" onclick={() => save({ lastSeenVersion: version })}>{t.gotIt}</button>
+      </nav>
+    </section>
+  {/if}
+
   {#if problem !== "none" && t.problems[problem]}
     <div class="problema" role="alert">
       <strong>{t.problems[problem].title}</strong>
@@ -512,16 +714,33 @@
     </div>
   {/if}
 
-  <div class="tabs">
-    {#each (["counter", "stats", "history", "settings", "diag"] as const).filter((name) => name !== "diag" || settings?.diagnostics) as name}
-      <button class:actual={tab === name} onclick={() => (tab = name)}>{t.tabs[name]}</button>
+  <div class="tabs" role="tablist" aria-label={t.tabsLabel}>
+    {#each visibleTabs as name (name)}
+      <button
+        role="tab"
+        id={`tab-${name}`}
+        aria-selected={tab === name}
+        aria-controls={`panel-${name}`}
+        tabindex={tab === name ? 0 : -1}
+        class:actual={tab === name}
+        onclick={() => (tab = name)}
+        onkeydown={tabKey}
+      >
+        {t.tabs[name]}
+      </button>
     {/each}
   </div>
 
   {#if tab === "counter" && stats}
-    <header class:activo={stats.inMatch && !stats.paused} class:pausa={stats.paused}>
-      <i></i>{stats.paused ? t.pausedState : stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
-    </header>
+  <div class="pestana pestana-counter" role="tabpanel" id="panel-counter" aria-labelledby="tab-counter" tabindex="-1">
+    <div class="estado">
+      <header class:activo={stats.inMatch && !stats.paused} class:pausa={stats.paused}>
+        <i></i>{stats.paused ? t.pausedState : stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
+      </header>
+      <span class="deteccion" class:viendo={!waiting} title={t.detectionHelp}>
+        {waiting ? t.detectionWaiting : t.detectionActive}
+      </span>
+    </div>
 
     {#if stats.paused}
       <div class="pausado" role="status">
@@ -542,6 +761,23 @@
       </div>
       {@render chips(stats.sessionCounts)}
       <small class="linea">{t.matches}: {stats.sessionMatches}</small>
+      {#if settings && settings.dailyGoal > 0}
+        {@const goal = settings.dailyGoal}
+        {@const done = stats.sessionCounts.total}
+        <div class="objetivo" class:cumplido={done >= goal}>
+          <div
+            class="barra"
+            role="progressbar"
+            aria-label={t.dailyGoal}
+            aria-valuemin={0}
+            aria-valuemax={goal}
+            aria-valuenow={Math.min(done, goal)}
+          >
+            <span style:width="{Math.min(100, (done / goal) * 100)}%"></span>
+          </div>
+          <small>{done >= goal ? t.goalReached(done, goal) : t.goalProgress(done, goal)}</small>
+        </div>
+      {/if}
     </section>
 
     <section>
@@ -557,6 +793,7 @@
       {#if !stats.paused}
         <button onclick={() => run("set_paused", { paused: true })}>{t.pause}</button>
       {/if}
+      <button onclick={copySummary} aria-live="polite">{copied ? t.copied : t.copySummary}</button>
     </nav>
 
     {#if undoable}
@@ -581,11 +818,13 @@
         {/if}
       </section>
     {/if}
+  </div>
   {/if}
 
   {#if tab === "stats" && stats}
     {@const games = stats.totalMatches}
     {@const average = (n: number) => (games > 0 ? (n / games).toFixed(2) : "—")}
+  <div class="pestana pestana-stats" role="tabpanel" id="panel-stats" aria-labelledby="tab-stats" tabindex="-1">
     <table>
       <thead>
         <tr><th></th><th>{t.total}</th><th>{t.perMatch}</th></tr>
@@ -606,6 +845,30 @@
       </tbody>
     </table>
     <div class="fila"><span>{t.matchesPlayed}</span><strong>{games}</strong></div>
+    {#if allMatches}
+      <section class="dias" aria-labelledby="titulo-dias">
+        <div class="fila"><span id="titulo-dias">{t.lastDaysTitle}</span></div>
+        {#if lastDays.length}
+          <table>
+            <thead>
+              <tr><th></th><th>{t.matches}</th><th>{t.chestsCol}</th><th>{t.perMatch}</th></tr>
+            </thead>
+            <tbody>
+              {#each lastDays as day (day.key)}
+                <tr>
+                  <td>{day.label}</td>
+                  <td>{day.matches}</td>
+                  <td>{day.chests}</td>
+                  <td>{(day.chests / day.matches).toFixed(1)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else}
+          <p class="vacio">{t.lastDaysEmpty}</p>
+        {/if}
+      </section>
+    {/if}
     {#if records}
       {@const most = records.mostChests}
       {@const longest = records.longest}
@@ -637,9 +900,11 @@
         {#if !most && !longest}<p class="vacio">{t.recordsEmpty}</p>{/if}
       </section>
     {/if}
+  </div>
   {/if}
 
   {#if tab === "history"}
+  <div class="pestana pestana-history" role="tabpanel" id="panel-history" aria-labelledby="tab-history" tabindex="-1">
     <section>
       <div class="fila">
         <span>{t.historyTitle}</span>
@@ -655,7 +920,10 @@
         {#each history as match (match.id)}
           <li>
             <div class="cabecera">
-              <span class="duracion" title={t.duration}>{clock(match.durationMs)}</span>
+              <span>
+                <span class="duracion" title={t.duration}>{clock(match.durationMs)}</span>
+                <small class="hora" title={t.startedAt}>{hourOf(match.startedAt)}</small>
+              </span>
               <strong>{match.counts.total}</strong>
             </div>
             {@render chips(match.counts)}
@@ -663,9 +931,11 @@
         {/each}
       </ul>
     {/if}
+  </div>
   {/if}
 
   {#if tab === "settings" && settings}
+  <div class="pestana pestana-settings" role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" tabindex="-1">
     <section>
       <div class="opcion">
         <span>{t.language}</span>
@@ -682,6 +952,33 @@
           onchange={(e) => save({ startWithWindows: e.currentTarget.checked })}
         />
       </label>
+      <div class="opcion">
+        <label for="objetivo">{t.dailyGoal}<Help text={t.help.dailyGoal} /></label>
+        <input
+          id="objetivo"
+          class="numero"
+          type="number"
+          min="0"
+          max="999"
+          step="1"
+          inputmode="numeric"
+          placeholder="0"
+          value={settings.dailyGoal || ""}
+          onchange={(e) => {
+            const goal = Math.min(999, Math.max(0, Math.trunc(Number(e.currentTarget.value) || 0)));
+            e.currentTarget.value = goal ? String(goal) : "";
+            save({ dailyGoal: goal });
+          }}
+        />
+      </div>
+      <div class="opcion">
+        <span>{t.theme}</span>
+        <select value={settings.theme} onchange={(e) => save({ theme: e.currentTarget.value })}>
+          {#each Object.entries(t.themes) as [value, name]}
+            <option {value}>{name}</option>
+          {/each}
+        </select>
+      </div>
       <div class="opcion">
         <span>{t.onClose}<Help text={t.help.onClose} /></span>
         <select
@@ -715,31 +1012,6 @@
         />
       </label>
       <div class="opcion">
-        <span>{t.hotkey}<Help text={t.help.hotkey} /></span>
-        <span class="atajo" aria-live="polite">
-          {#if capturingHotkey}
-            <em>{t.hotkeyPress}</em>
-          {:else if settings.overlayHotkey}
-            {#each hotkeyParts(settings.overlayHotkey) as part, i}
-              {#if i > 0}<span aria-hidden="true">+</span>{/if}<kbd>{part}</kbd>
-            {/each}
-          {:else}
-            <em>{t.hotkeyNone}</em>
-          {/if}
-        </span>
-      </div>
-      <nav class="botones">
-        <button onclick={startHotkeyCapture} disabled={capturingHotkey}>
-          {settings.overlayHotkey ? t.changeKey : t.hotkeyAssign}
-        </button>
-        {#if capturingHotkey}
-          <button onclick={() => (capturingHotkey = false)}>{t.cancel}</button>
-        {:else if settings.overlayHotkey}
-          <button onclick={() => saveHotkey("")}>{t.hotkeyRemove}</button>
-        {/if}
-      </nav>
-      {#if hotkeyHint}<p class="aviso-atajo" role="alert">{hotkeyHint}</p>{/if}
-      <div class="opcion">
         <span>{t.corner}</span>
         <select value={settings.corner} onchange={(e) => save({ corner: e.currentTarget.value })}>
           {#each Object.entries(t.corners) as [value, name]}
@@ -764,6 +1036,32 @@
           <option value="total">{t.optAllTime}</option>
         </select>
       </div>
+      <label class="opcion">
+        <span>{t.optOnlyInMatch}<Help text={t.help.optOnlyInMatch} /></span>
+        <input
+          type="checkbox"
+          checked={settings.overlayOnlyInMatch}
+          onchange={(e) => save({ overlayOnlyInMatch: e.currentTarget.checked })}
+        />
+      </label>
+      {#if settings.dailyGoal > 0}
+        <label class="opcion">
+          <span>{t.optGoal}</span>
+          <input
+            type="checkbox"
+            checked={settings.overlayGoal}
+            onchange={(e) => save({ overlayGoal: e.currentTarget.checked })}
+          />
+        </label>
+      {/if}
+      <label class="opcion">
+        <span>{t.optFlash}<Help text={t.help.optFlash} /></span>
+        <input
+          type="checkbox"
+          checked={settings.overlayFlash}
+          onchange={(e) => save({ overlayFlash: e.currentTarget.checked })}
+        />
+      </label>
       <label class="opcion">
         <span>{t.optSummary}<Help text={t.help.optSummary} /></span>
         <input
@@ -832,6 +1130,12 @@
     </section>
 
     <section>
+      <div class="fila"><span>{t.shortcutsTitle}</span></div>
+      {@render hotkeyRow("overlayHotkey", t.hotkey, t.help.hotkey)}
+      {@render hotkeyRow("pauseHotkey", t.pauseHotkey, t.help.pauseHotkey)}
+    </section>
+
+    <section>
       <div class="opcion">
         <span>{t.openWith}<Help text={t.help.openWith} /></span>
         <b>{capturing ? t.pressNow : bindingLabel(settings.binding)}</b>
@@ -886,8 +1190,29 @@
             <small>{backups.latest ? t.backupsSummary(backups.count, backupDay(backups.latest)) : t.backupsNone}</small>
           {/if}
           <button onclick={() => invoke("open_backups_dir").catch((e) => (error = String(e)))}>{t.openFolder}</button>
+          <button onclick={openRestore} disabled={backupFiles !== null}>{t.restore}</button>
         </span>
       </div>
+      {#if backupFiles}
+        {#if backupFiles.length}
+          <div class="opcion">
+            <label for="copia">{t.restoreWhich}</label>
+            <select id="copia" bind:value={restoreChoice}>
+              {#each backupFiles as file (file.name)}
+                <option value={file.name}>{backupLabel(file)}</option>
+              {/each}
+            </select>
+          </div>
+          <p class="nota-mover" role="note">{t.restoreWarning}</p>
+          <nav class="botones">
+            <button class="peligro" onclick={restoreBackup}>{t.restoreConfirm}</button>
+            <button onclick={() => (backupFiles = null)}>{t.cancel}</button>
+          </nav>
+        {:else}
+          <p class="nota">{t.backupsNone}</p>
+        {/if}
+      {/if}
+      {#if restoreDone}<p class="nota" role="status">{t.restoreDone}</p>{/if}
     </section>
 
     <section>
@@ -916,9 +1241,11 @@
     {#if version}
       <p class="version">Fortnite Chest Counter · v{version}</p>
     {/if}
+  </div>
   {/if}
 
   {#if tab === "diag" && diag}
+  <div class="pestana pestana-diag" role="tabpanel" id="panel-diag" aria-labelledby="tab-diag" tabindex="-1">
     <section>
       <div class="fila"><span>{t.detection}</span></div>
       {#if diag.detectError}
@@ -984,6 +1311,7 @@
         {/each}
       </nav>
     {/if}
+  </div>
   {/if}
 
   {/if}
@@ -1013,6 +1341,46 @@
     --espiritu: #e879f9;
   }
 
+  /* Tema claro: la misma paleta violeta sobre fondo claro, con contraste
+     suficiente (texto secundario y colores de aviso más oscuros). */
+  :global(:root[data-theme="light"]) {
+    color-scheme: light;
+    --bg: #f5f3ff;
+    --card: #ffffff;
+    --muted: #ede9fe;
+    --border: #d8d0f5;
+    --text: #1e1b4b;
+    --text-muted: #57537a;
+    --primary: #7c3aed;
+    --primary-soft: #6d28d9;
+    --accent: #e11d48;
+    --danger: #dc2626;
+    --warn: #b45309;
+    --ok: #15803d;
+    --tesoro: #d97706;
+    --raro: #2563eb;
+    --espiritu: #c026d3;
+  }
+
+  :global(:root) {
+    color-scheme: dark;
+  }
+
+  /* Foco visible para quien usa el teclado (no con el ratón). */
+  :global(:focus-visible) {
+    outline: 2px solid var(--primary-soft);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(*),
+    :global(*::before),
+    :global(*::after) {
+      transition: none !important;
+      animation: none !important;
+    }
+  }
+
   :global(html, body) {
     margin: 0;
     background: var(--bg);
@@ -1032,6 +1400,83 @@
     max-width: 620px;
     margin: 0 auto;
     padding: 12px clamp(10px, 4vw, 20px) 20px;
+  }
+
+  .pestana {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .pestana:focus {
+    outline: none;
+  }
+
+  /* Panel estrecho: pestañas en una fila que se desplaza y números algo más
+     pequeños, para que todo quepa sin cortar. */
+  @media (max-width: 379px) {
+    main .tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    main .tabs button {
+      flex: none;
+      padding: 8px 7px;
+    }
+
+    main strong {
+      font-size: 26px;
+    }
+
+    main section {
+      padding: 10px 12px;
+    }
+  }
+
+  /* Panel ancho: se aprovecha el espacio en columnas. */
+  @media (min-width: 760px) {
+    main {
+      max-width: 980px;
+    }
+
+    .pestana-counter {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: start;
+    }
+
+    .pestana-counter > :global(:not(section)) {
+      grid-column: 1 / -1;
+    }
+
+    .pestana-stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: start;
+    }
+
+    .pestana-stats > :global(.fila) {
+      grid-column: 1 / -1;
+    }
+
+    .pestana-history .historial {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .pestana-settings {
+      display: block;
+      columns: 2;
+      column-gap: 12px;
+    }
+
+    .pestana-settings > :global(*) {
+      break-inside: avoid;
+      margin-bottom: 12px;
+    }
   }
 
   .tabs {
@@ -1085,6 +1530,93 @@
   header.activo i {
     background: var(--ok);
     box-shadow: 0 0 8px var(--ok);
+  }
+
+  .estado {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 12px;
+  }
+
+  .deteccion {
+    padding: 2px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .deteccion.viendo {
+    border-color: color-mix(in srgb, var(--ok) 50%, var(--border));
+    color: var(--ok);
+  }
+
+  .objetivo {
+    margin-top: 8px;
+  }
+
+  .barra {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--muted);
+    overflow: hidden;
+  }
+
+  .barra span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary);
+    transition: width 300ms ease-out;
+  }
+
+  .objetivo.cumplido .barra span {
+    background: var(--ok);
+  }
+
+  .objetivo small {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+  }
+
+  .objetivo.cumplido small {
+    color: var(--ok);
+    font-weight: 600;
+  }
+
+  input.numero {
+    width: 6em;
+    text-align: right;
+  }
+
+  .hora {
+    margin-left: 8px;
+    font-size: 12px;
+  }
+
+  .nota {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .dias table {
+    margin-top: 6px;
+  }
+
+  .novedades {
+    border-color: color-mix(in srgb, var(--primary) 60%, var(--border));
+  }
+
+  .novedades ul {
+    margin: 8px 0;
+    padding-left: 20px;
+    font-size: 14px;
+    line-height: 1.6;
   }
 
   header.pausa {
@@ -1238,6 +1770,7 @@
   button:hover:not(:disabled) {
     background: var(--primary);
     border-color: var(--primary);
+    color: #fff;
   }
 
   button.peligro {
@@ -1434,6 +1967,7 @@
   button.principal {
     background: var(--primary);
     border-color: var(--primary);
+    color: #fff;
     font-weight: 600;
   }
 

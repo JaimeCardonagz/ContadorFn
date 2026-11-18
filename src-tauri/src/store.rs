@@ -56,6 +56,8 @@ pub struct Counts {
 pub struct MatchSummary {
     /// Identificador interno, solo para que la interfaz distinga las filas.
     pub id: i64,
+    /// Inicio de la partida (epoch ms).
+    pub started_at: i64,
     pub duration_ms: i64,
     pub counts: Counts,
 }
@@ -159,6 +161,29 @@ impl Store {
         self.conn
             .execute("VACUUM INTO ?1", params![path.to_string_lossy()])
             .map(|_| ())
+    }
+
+    /// ¿Es `path` una base de datos de este programa? Se abre solo para leer.
+    pub fn is_valid_copy(path: &Path) -> bool {
+        use rusqlite::OpenFlags;
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .and_then(|conn| {
+                conn.query_row(
+                    "SELECT (SELECT COUNT(*) FROM chest_events) + (SELECT COUNT(*) FROM matches)",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+            })
+            .is_ok()
+    }
+
+    /// Sustituye todo el contenido por el de la copia `path` (que no se toca).
+    pub fn restore_from(&mut self, path: &Path) -> Result<()> {
+        self.conn.restore(
+            rusqlite::MAIN_DB,
+            path,
+            None::<fn(rusqlite::backup::Progress)>,
+        )
     }
 
     #[cfg(test)]
@@ -340,7 +365,8 @@ impl Store {
                 "SELECT m.id, m.ended_at - m.started_at,
                         COALESCE(SUM(e.chest_type = 'normal'), 0),
                         COALESCE(SUM(e.chest_type = 'rare'), 0),
-                        COALESCE(SUM(e.chest_type = 'spirit'), 0)
+                        COALESCE(SUM(e.chest_type = 'spirit'), 0),
+                        m.started_at
                  FROM matches m LEFT JOIN chest_events e ON e.match_id = m.id
                  WHERE m.ended_at IS NOT NULL AND m.started_at >= ?1
                  GROUP BY m.id
@@ -350,6 +376,7 @@ impl Store {
                 let (normal, rare, spirit): (u32, u32, u32) = (r.get(2)?, r.get(3)?, r.get(4)?);
                 Ok(MatchSummary {
                     id: r.get(0)?,
+                    started_at: r.get(5)?,
                     duration_ms: r.get::<_, i64>(1)?.max(0),
                     counts: Counts {
                         normal,

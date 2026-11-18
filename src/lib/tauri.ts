@@ -42,6 +42,13 @@ const sample: Record<string, unknown> = {
     overlayX: 0,
     overlayY: 0,
     overlayHotkey: "Ctrl+Shift+KeyO",
+    pauseHotkey: "",
+    overlayOnlyInMatch: false,
+    overlayFlash: true,
+    dailyGoal: 80,
+    overlayGoal: true,
+    theme: new URLSearchParams(location.search).get("tema") ?? "dark",
+    lastSeenVersion: new URLSearchParams(location.search).get("novedades") !== null ? "1.2.0" : "1.3.0",
     corner: "top-left",
     setupDone: new URLSearchParams(location.search).get("inicio") === null,
     overlayMatch: "total",
@@ -82,12 +89,24 @@ const sample: Record<string, unknown> = {
     dayChests: 35,
   },
   get_vision_problem: "none",
+  get_detection_waiting: false,
+  list_backups: [
+    { name: "estadisticas-2026-11-18.db", kind: "daily", day: "2026-11-18" },
+    { name: "estadisticas-2026-11-17.db", kind: "daily", day: "2026-11-17" },
+    { name: "antes-de-reiniciar.db", kind: "reset", day: null },
+  ],
+  get_all_matches: [
+    { id: 6, startedAt: Date.now() - 1_300_000, durationMs: 1_114_000, counts: counts(9, 2, 1) },
+    { id: 5, startedAt: Date.now() - 2_400_000, durationMs: 742_000, counts: counts(5, 0, 1) },
+    { id: 2, startedAt: Date.now() - 86_400_000, durationMs: 900_000, counts: counts(7, 1, 0) },
+    { id: 1, startedAt: Date.now() - 3 * 86_400_000, durationMs: 1_200_000, counts: counts(11, 2, 2) },
+  ],
   backup_info: { count: 7, latest: "2026-11-18" },
   get_history: [
-    { id: 6, durationMs: 1_114_000, counts: counts(9, 2, 1) },
-    { id: 5, durationMs: 742_000, counts: counts(5, 0, 1) },
-    { id: 4, durationMs: 96_000, counts: counts(0, 0, 0) },
-    { id: 3, durationMs: 1_385_000, counts: counts(14, 3, 0) },
+    { id: 6, startedAt: Date.now() - 1_300_000, durationMs: 1_114_000, counts: counts(9, 2, 1) },
+    { id: 5, startedAt: Date.now() - 2_400_000, durationMs: 742_000, counts: counts(5, 0, 1) },
+    { id: 4, startedAt: Date.now() - 3_600_000, durationMs: 96_000, counts: counts(0, 0, 0) },
+    { id: 3, startedAt: Date.now() - 6_000_000, durationMs: 1_385_000, counts: counts(14, 3, 0) },
   ],
 };
 
@@ -119,5 +138,5 @@ export function startDragging(): void {
 
 /** Versión instalada de la app (en el navegador, una de ejemplo). */
 export function appVersion(): Promise<string> {
-  return inTauri ? getVersion() : Promise.resolve("1.1.2");
+  return inTauri ? getVersion() : Promise.resolve("1.3.0");
 }

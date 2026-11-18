@@ -182,6 +182,27 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Versión 1.3.0 (2026-11-18)
+
+Otras dieciséis mejoras:
+
+1. **Panel adaptable**: estrecho (< 380 px), las pestañas van en una fila desplazable; ancho (≥ 760 px), Contador en tres columnas, Estadísticas e Historial en dos y Configuración en dos columnas.
+2. **Tema claro, oscuro o como Windows** (`theme`; por defecto oscuro). Paleta clara en `:root[data-theme="light"]` con contraste suficiente.
+3. **Teclado**: pestañas con roles ARIA (`tablist`/`tab`/`tabpanel`), flechas, Inicio y Fin; Ctrl+1…5 desde cualquier sitio; foco visible; sin animaciones con "reducir movimiento".
+4. **Objetivo de cofres del día** (`dailyGoal`, 0 = sin objetivo; hasta 999): barra de progreso en la tarjeta de hoy y, si se quiere (`overlayGoal`), línea "Hoy 12/30" en el contador. Cuenta los cofres de la sesión del día.
+5. **Restaurar una copia de seguridad** (`backup::restore`): solo copias de la lista, se comprueba que sea una base de datos del programa, antes se guarda `antes-de-restaurar.db` (deshacer) y se conservan los ajustes y la posición del panel actuales. API de copia en línea de SQLite (`rusqlite`, función `backup`).
+6. **Menú de la bandeja**: Nueva partida y Mostrar u ocultar el contador.
+7. **Contador solo durante la partida** (`overlayOnlyInMatch`, según el HUD).
+8. **Últimos 7 días** en Estadísticas (partidas, cofres y promedio por día local).
+9. **Destello "+1"** con el tipo de cofre al contarlo (`overlayFlash`).
+10. **Comprobación de versión nueva cada 6 horas**, además de al arrancar.
+11. **Novedades** tras actualizar, una vez por versión (`lastSeenVersion`).
+12. **El contador ajusta su ventana a lo que muestra** (`fit_overlay`, recolocándolo) y tamaño **Automático** según el alto de la zona del juego (15 px a 1080, entre 12 y 24).
+13. **Hora de inicio** de cada partida en el Historial (`MatchSummary.started_at`).
+14. **Copiar resumen** del día al portapapeles.
+15. **Estado de la detección** en el Contador: "Viendo el juego" o "Esperando al juego" (evento `detection-waiting`).
+16. **Atajo global para pausar el conteo** (`pauseHotkey`). Los atajos se registran juntos: si uno falla, quedan los anteriores; no pueden ser iguales.
+
 ### Versión 1.2.0 (2026-11-18)
 
 Dieciséis mejoras de comodidad:

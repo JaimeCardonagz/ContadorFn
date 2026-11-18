@@ -16,6 +16,8 @@ const PREFIX: &str = "estadisticas-";
 const EXT: &str = ".db";
 /// La copia de antes de reiniciar: solo una, la última.
 const BEFORE_RESET: &str = "antes-de-reiniciar.db";
+/// La copia de antes de restaurar otra: para poder deshacerlo.
+const BEFORE_RESTORE: &str = "antes-de-restaurar.db";
 
 /// Fecha local de hoy como "AAAA-MM-DD" (en Windows; en otros sistemas, UTC).
 pub fn today(now_ms: i64) -> String {
@@ -101,6 +103,80 @@ pub fn before_reset(tracker: &Tracker, dir: &Path) -> io::Result<()> {
     write_copy(tracker, &target)
 }
 
+/// Una copia que se puede restaurar.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupFile {
+    /// Nombre del archivo: es lo único que la interfaz devuelve para elegirla.
+    pub name: String,
+    /// "daily" (con `day`), "reset" o "restore".
+    pub kind: &'static str,
+    pub day: Option<String>,
+}
+
+/// Copias disponibles: las diarias de la más nueva a la más antigua y luego
+/// las de antes de reiniciar y de antes de restaurar.
+pub fn list(dir: &Path) -> Vec<BackupFile> {
+    let mut files: Vec<BackupFile> = daily_copies(dir)
+        .iter()
+        .rev()
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?.to_string();
+            let day = name.strip_prefix(PREFIX)?.strip_suffix(EXT)?.to_string();
+            Some(BackupFile {
+                name,
+                kind: "daily",
+                day: Some(day),
+            })
+        })
+        .collect();
+    for (name, kind) in [(BEFORE_RESET, "reset"), (BEFORE_RESTORE, "restore")] {
+        if dir.join(name).is_file() {
+            files.push(BackupFile {
+                name: name.to_string(),
+                kind,
+                day: None,
+            });
+        }
+    }
+    files
+}
+
+/// Ruta de la copia `name`, solo si es una de las de `list` (así no se puede
+/// pedir ningún otro archivo).
+pub fn resolve(dir: &Path, name: &str) -> Option<PathBuf> {
+    list(dir)
+        .iter()
+        .any(|file| file.name == name)
+        .then(|| dir.join(name))
+}
+
+/// Restaura la copia `name`. Antes guarda lo de ahora en
+/// `antes-de-restaurar.db`, para poder volver atrás.
+pub fn restore(tracker: &mut Tracker, dir: &Path, name: &str, now: i64) -> Result<(), String> {
+    let source = resolve(dir, name).ok_or("copia no encontrada")?;
+    if !crate::store::Store::is_valid_copy(&source) {
+        return Err(crate::settings::tr(
+            "Esa copia está dañada o no es de este programa.",
+            "That backup is damaged or not from this program.",
+        )
+        .into());
+    }
+    // Si se restaura la propia copia de antes de restaurar, se aparta primero
+    // porque va a sobrescribirse.
+    let temp = dir.join("restaurando.tmp");
+    let _ = fs::remove_file(&temp);
+    fs::copy(&source, &temp).map_err(|e| e.to_string())?;
+    let result = (|| {
+        let target = dir.join(BEFORE_RESTORE);
+        let _ = fs::remove_file(&target);
+        write_copy(tracker, &target).map_err(|e| e.to_string())?;
+        tracker.restore_from(&temp, now).map_err(|e| e.to_string())
+    })();
+    let _ = fs::remove_file(&temp);
+    result
+}
+
 /// Lo que enseña Configuración sobre las copias.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,6 +251,73 @@ mod tests {
         let back = Tracker::new(copy, 2_000, 3_600_000).unwrap();
         assert_eq!(back.stats().unwrap().total_counts.rare, 1);
         assert!(!dir.join("estadisticas-2026-11-09.tmp").exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn restaurar_recupera_la_copia_y_guarda_lo_de_ahora_para_deshacerlo() {
+        let dir = temp_dir("restaurar");
+        let mut t = tracker_with_chest();
+        daily(&t, &dir, "2026-11-01").unwrap();
+        // Después se cuentan más cofres.
+        t.chest_opened(2_000, ChestType::Normal, 1.0, 0b11_1111)
+            .unwrap();
+        t.chest_opened(3_000, ChestType::Normal, 1.0, 0b11_1111)
+            .unwrap();
+        assert_eq!(t.stats().unwrap().total_counts.total, 3);
+        // Solo se puede pedir una copia de la lista.
+        assert!(restore(&mut t, &dir, "../chests.db", 4_000).is_err());
+        assert!(resolve(&dir, "estadisticas-2026-11-01.db").is_some());
+        restore(&mut t, &dir, "estadisticas-2026-11-01.db", 4_000).unwrap();
+        assert_eq!(t.stats().unwrap().total_counts.total, 1);
+        let names: Vec<_> = list(&dir).into_iter().map(|f| (f.name, f.kind)).collect();
+        assert_eq!(
+            names,
+            [
+                ("estadisticas-2026-11-01.db".to_string(), "daily"),
+                ("antes-de-restaurar.db".to_string(), "restore"),
+            ]
+        );
+        // Deshacer: restaurar la de antes de restaurar devuelve los 3.
+        restore(&mut t, &dir, "antes-de-restaurar.db", 5_000).unwrap();
+        assert_eq!(t.stats().unwrap().total_counts.total, 3);
+        // Un archivo que no es una base de datos no se restaura.
+        fs::write(dir.join("estadisticas-2026-11-02.db"), "basura").unwrap();
+        assert!(restore(&mut t, &dir, "estadisticas-2026-11-02.db", 6_000).is_err());
+        assert_eq!(t.stats().unwrap().total_counts.total, 3);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn funciona_con_la_base_de_datos_real_en_disco() {
+        // Como en el programa: archivo en disco en modo WAL.
+        let dir = temp_dir("disco");
+        fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("chests.db")).unwrap();
+        let mut t = Tracker::new(store, 0, 3_600_000).unwrap();
+        t.chest_opened(1_000, ChestType::Spirit, 1.0, 0b11_1111)
+            .unwrap();
+        let copies = dir.join(DIR);
+        daily(&t, &copies, "2026-11-01").unwrap();
+        t.chest_opened(2_000, ChestType::Spirit, 1.0, 0b11_1111)
+            .unwrap();
+        assert!(Store::is_valid_copy(
+            &copies.join("estadisticas-2026-11-01.db")
+        ));
+        restore(&mut t, &copies, "estadisticas-2026-11-01.db", 3_000).unwrap();
+        assert_eq!(t.stats().unwrap().total_counts.spirit, 1);
+        drop(t);
+        let reopened = Tracker::new(
+            Store::open(&dir.join("chests.db")).unwrap(),
+            4_000,
+            3_600_000,
+        )
+        .unwrap();
+        assert_eq!(
+            reopened.stats().unwrap().total_counts.spirit,
+            1,
+            "queda guardado"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

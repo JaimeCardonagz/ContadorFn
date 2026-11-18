@@ -90,6 +90,7 @@ pub struct Diag {
     binding: Mutex<Binding>,
     require_input: AtomicBool,
     show_overlay: AtomicBool,
+    only_in_match: AtomicBool,
     save_samples: AtomicBool,
     /// Última pulsación del botón de abrir (epoch ms); 0 = ninguna.
     last_press: AtomicI64,
@@ -120,6 +121,7 @@ impl Diag {
             binding: Mutex::new(settings.binding.clone()),
             require_input: AtomicBool::new(settings.require_input),
             show_overlay: AtomicBool::new(settings.show_overlay),
+            only_in_match: AtomicBool::new(settings.overlay_only_in_match),
             save_samples: AtomicBool::new(settings.save_samples),
             last_press: AtomicI64::new(0),
         })
@@ -135,6 +137,8 @@ impl Diag {
         *self.binding.lock().unwrap_or_else(|e| e.into_inner()) = settings.binding.clone();
         self.require_input.store(settings.require_input, SeqCst);
         self.show_overlay.store(settings.show_overlay, SeqCst);
+        self.only_in_match
+            .store(settings.overlay_only_in_match, SeqCst);
         self.save_samples.store(settings.save_samples, SeqCst);
     }
 
@@ -144,6 +148,11 @@ impl Diag {
 
     pub fn save_samples(&self) -> bool {
         self.enabled() && self.save_samples.load(SeqCst)
+    }
+
+    /// ¿Contador solo durante la partida?
+    pub fn only_in_match(&self) -> bool {
+        self.only_in_match.load(SeqCst)
     }
 
     pub fn show_overlay(&self) -> bool {

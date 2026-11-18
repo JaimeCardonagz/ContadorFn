@@ -138,6 +138,11 @@ pub struct MatchWatcher {
 }
 
 impl MatchWatcher {
+    /// ¿Hay una partida en curso (según el HUD)?
+    pub fn in_match(&self) -> bool {
+        self.in_match
+    }
+
     pub fn step(&mut self, now: i64, bar_visible: bool) -> Option<MatchEvent> {
         if !self.in_match {
             self.visible_streak = if bar_visible {

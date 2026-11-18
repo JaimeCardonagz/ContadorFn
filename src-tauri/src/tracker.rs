@@ -72,6 +72,20 @@ impl Tracker {
     /// inesperado: las partidas abiertas se cierran como interrumpidas y la
     /// sesión abierta se reanuda solo si su última actividad es reciente.
     pub fn new(store: Store, now: i64, inactivity_ms: i64) -> Result<Self> {
+        let (session, last_activity) = Self::recover(&store, now, inactivity_ms)?;
+        Ok(Self {
+            store,
+            inactivity_ms,
+            session,
+            active_match: None,
+            shown_match: None,
+            last_activity,
+            paused: false,
+        })
+    }
+
+    /// Cierra lo que quedó abierto y decide qué sesión sigue activa.
+    fn recover(store: &Store, now: i64, inactivity_ms: i64) -> Result<(Option<(i64, i64)>, i64)> {
         store.close_interrupted_matches()?;
         let mut session = None;
         let mut last_activity = now;
@@ -84,15 +98,33 @@ impl Tracker {
                 store.end_session(id, activity)?;
             }
         }
-        Ok(Self {
-            store,
-            inactivity_ms,
-            session,
-            active_match: None,
-            shown_match: None,
-            last_activity,
-            paused: false,
-        })
+        Ok((session, last_activity))
+    }
+
+    /// Recupera las estadísticas de una copia de seguridad. Los ajustes y la
+    /// posición del panel de ahora se conservan (la copia trae los suyos).
+    pub fn restore_from(&mut self, path: &std::path::Path, now: i64) -> Result<()> {
+        let keep: Vec<(&str, Option<String>)> = ["settings", crate::panel::META_KEY]
+            .into_iter()
+            .map(|key| Ok((key, self.store.meta(key)?)))
+            .collect::<Result<_>>()?;
+        self.store.restore_from(path)?;
+        for (key, value) in keep {
+            if let Some(value) = value {
+                self.store.set_meta(key, &value)?;
+            }
+        }
+        let (session, last_activity) = Self::recover(&self.store, now, self.inactivity_ms)?;
+        self.session = session;
+        self.last_activity = last_activity;
+        self.active_match = None;
+        self.shown_match = None;
+        Ok(())
+    }
+
+    /// Todas las partidas terminadas, la más reciente primero (para exportar).
+    pub fn all_matches(&self) -> Result<Vec<MatchSummary>> {
+        self.store.recent_matches(i64::MIN)
     }
 
     /// Inicia una sesión si no hay ninguna activa.

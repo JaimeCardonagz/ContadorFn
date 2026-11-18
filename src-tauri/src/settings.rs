@@ -70,9 +70,23 @@ pub struct Settings {
     pub overlay_color: bool,
     /// Mostrar unos segundos el resumen de la partida al terminar.
     pub match_summary: bool,
+    /// Mostrar el contador solo durante la partida (no en el lobby).
+    pub overlay_only_in_match: bool,
+    /// Objetivo de cofres del día (0: sin objetivo).
+    pub daily_goal: u32,
+    /// Mostrar el objetivo del día en el contador sobre el juego.
+    pub overlay_goal: bool,
+    /// Destello "+1" en el contador al contar un cofre.
+    pub overlay_flash: bool,
+    /// Tema del panel: "dark", "light" o "system".
+    pub theme: String,
+    /// Última versión cuyas novedades vio el usuario.
+    pub last_seen_version: String,
     /// Atajo global para mostrar u ocultar el contador, como "Ctrl+Shift+KeyO".
     /// Vacío: sin atajo.
     pub overlay_hotkey: String,
+    /// Atajo global para pausar o reanudar el conteo. Vacío: sin atajo.
+    pub pause_hotkey: String,
     /// Tamaño del texto del contador: "small", "medium" o "large".
     pub overlay_size: String,
     /// Opacidad del contador, de 40 a 100.
@@ -101,7 +115,14 @@ impl Default for Settings {
             overlay_chests: "sum".into(),
             overlay_color: true,
             match_summary: true,
+            overlay_only_in_match: false,
+            daily_goal: 0,
+            overlay_goal: true,
+            overlay_flash: true,
+            theme: "dark".into(),
+            last_seen_version: String::new(),
             overlay_hotkey: String::new(),
+            pause_hotkey: String::new(),
             overlay_size: "medium".into(),
             overlay_opacity: 100,
         }
@@ -174,7 +195,14 @@ mod tests {
                 overlay_chests: "types".into(),
                 overlay_color: false,
                 match_summary: false,
+                overlay_only_in_match: true,
+                daily_goal: 30,
+                overlay_goal: false,
+                overlay_flash: false,
+                theme: "light".into(),
+                last_seen_version: "1.2.0".into(),
                 overlay_hotkey: "Ctrl+Alt+KeyC".into(),
+                pause_hotkey: "Ctrl+Alt+KeyP".into(),
                 overlay_size: "large".into(),
                 overlay_opacity: 60,
             };

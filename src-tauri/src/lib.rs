@@ -65,7 +65,10 @@ struct BackupDir(std::path::PathBuf);
 
 /// Atajo global que muestra u oculta el contador (el registrado ahora). Solo
 /// existe si el sistema de atajos globales arrancó bien.
-struct OverlayHotkey(Mutex<Option<Shortcut>>);
+struct Hotkeys(Mutex<[Option<Shortcut>; 2]>);
+/// Posiciones en `Hotkeys`: mostrar u ocultar el contador y pausar el conteo.
+const HOTKEY_OVERLAY: usize = 0;
+const HOTKEY_PAUSE: usize = 1;
 /// Versión nueva encontrada por `check_update`: la única que se puede instalar.
 struct UpdateState(Mutex<Option<updater::Version>>);
 
@@ -253,8 +256,8 @@ fn set_settings(
     diag: State<Arc<Diag>>,
     settings: Settings,
 ) -> Result<(), String> {
-    // Antes que nada: si el atajo no se puede registrar, no se guarda nada.
-    set_overlay_hotkey(&app, &settings.overlay_hotkey)?;
+    // Antes que nada: si un atajo no se puede registrar, no se guarda nada.
+    set_global_hotkeys(&app, &settings.overlay_hotkey, &settings.pause_hotkey)?;
     let mut tracker = state.0.lock().map_err(|e| e.to_string())?;
     tracker
         .save_settings(&settings)
@@ -372,6 +375,37 @@ fn overlay_fraction(at: (i32, i32), area: (i32, i32, u32, u32), size: (u32, u32)
     )
 }
 
+/// ¿Está el análisis esperando a que el juego esté delante?
+static DETECTION_WAITING: AtomicBool = AtomicBool::new(true);
+
+/// El bucle de detección avisa de si está analizando o esperando al juego.
+pub(crate) fn set_detection_waiting(app: &AppHandle, waiting: bool) {
+    DETECTION_WAITING.store(waiting, Relaxed);
+    let _ = app.emit("detection-waiting", waiting);
+}
+
+#[tauri::command]
+fn get_detection_waiting() -> bool {
+    DETECTION_WAITING.load(Relaxed)
+}
+
+/// Última zona donde se colocó el contador (para recolocarlo si cambia de tamaño).
+static LAST_PLACED_AREA: Mutex<Option<capture::Area>> = Mutex::new(None);
+
+/// El contador ajusta su ventana a lo que muestra (ancho y alto en píxeles
+/// lógicos) y se recoloca, porque en las esquinas de la derecha o de abajo su
+/// posición depende de su tamaño.
+#[tauri::command]
+fn fit_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    let window = app.get_webview_window("overlay").ok_or("sin contador")?;
+    let size = tauri::LogicalSize::new(width.clamp(40.0, 900.0), height.clamp(16.0, 500.0));
+    window.set_size(size).map_err(|e| e.to_string())?;
+    if let Some(area) = LAST_PLACED_AREA.lock().ok().and_then(|a| *a) {
+        place_overlay(&app, &area);
+    }
+    Ok(())
+}
+
 /// Mientras se coloca el contador arrastrándolo, nadie más lo mueve ni lo oculta.
 static MOVING_OVERLAY: AtomicBool = AtomicBool::new(false);
 /// Última zona donde se vio la ventana del juego: ahí se coloca el contador.
@@ -480,6 +514,13 @@ pub(crate) fn place_overlay(app: &AppHandle, area: &capture::Area) {
     let Some(window) = app.get_webview_window("overlay") else {
         return;
     };
+    if let Ok(mut last) = LAST_PLACED_AREA.lock() {
+        *last = Some(*area);
+    }
+    // Alto de la zona del juego en píxeles lógicos: con él, el tamaño
+    // "Automático" del contador escala con la resolución.
+    let scale = window.scale_factor().unwrap_or(1.0).max(0.5);
+    let _ = app.emit("overlay-area", f64::from(area.height) / scale);
     if MOVING_OVERLAY.load(Relaxed) {
         return;
     }
@@ -581,20 +622,30 @@ fn tray_tooltip(stats: &Stats) -> String {
     format!("Fortnite Chest Counter\n{current}\n{day}{paused}")
 }
 
-/// Opción del menú de la bandeja para pausar o reanudar el conteo.
-struct PauseItem(tauri::menu::MenuItem<tauri::Wry>);
+/// Opciones del menú de la bandeja, para poner al día sus textos.
+struct TrayItems(Vec<(&'static str, tauri::menu::MenuItem<tauri::Wry>)>);
+
+/// Texto de cada opción del menú de la bandeja.
+fn tray_label(id: &str, stats: &Stats) -> &'static str {
+    match id {
+        "open" => tr("Abrir panel", "Open panel"),
+        "pause" if stats.paused => tr("Reanudar conteo", "Resume counting"),
+        "pause" => tr("Pausar conteo", "Pause counting"),
+        "new_match" => tr("Nueva partida", "New match"),
+        "overlay" => tr("Mostrar u ocultar el contador", "Show or hide the counter"),
+        _ => tr("Salir", "Quit"),
+    }
+}
 
 /// Pone al día el texto del icono de la bandeja.
 fn refresh_tray(app: &AppHandle, stats: &Stats) {
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_tooltip(Some(tray_tooltip(stats)));
     }
-    if let Some(item) = app.try_state::<PauseItem>() {
-        let _ = item.0.set_text(if stats.paused {
-            tr("Reanudar conteo", "Resume counting")
-        } else {
-            tr("Pausar conteo", "Pause counting")
-        });
+    if let Some(items) = app.try_state::<TrayItems>() {
+        for (id, item) in &items.0 {
+            let _ = item.set_text(tray_label(id, stats));
+        }
     }
 }
 
@@ -602,42 +653,43 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    let open = MenuItem::with_id(
+    use tauri::menu::PredefinedMenuItem;
+
+    let stats = Stats::default();
+    let item = |id: &'static str| {
+        MenuItem::with_id(app, id, tray_label(id, &stats), true, None::<&str>)
+            .map(|item| (id, item))
+    };
+    let items = ["open", "pause", "new_match", "overlay", "quit"]
+        .into_iter()
+        .map(item)
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let find = |id: &str| &items.iter().find(|(i, _)| *i == id).expect("opción").1;
+    let menu = Menu::with_items(
         app,
-        "open",
-        tr("Abrir panel", "Open panel"),
-        true,
-        None::<&str>,
+        &[
+            find("open"),
+            &separator,
+            find("pause"),
+            find("new_match"),
+            find("overlay"),
+            &PredefinedMenuItem::separator(app)?,
+            find("quit"),
+        ],
     )?;
-    let pause = MenuItem::with_id(
-        app,
-        "pause",
-        tr("Pausar conteo", "Pause counting"),
-        true,
-        None::<&str>,
-    )?;
-    let quit = MenuItem::with_id(app, "quit", tr("Salir", "Quit"), true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
-    app.manage(PauseItem(pause));
+    app.manage(TrayItems(items));
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Fortnite Chest Counter")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_panel(app),
-            "pause" => {
-                let paused = app
-                    .state::<AppState>()
-                    .0
-                    .lock()
-                    .ok()
-                    .and_then(|t| t.stats().ok())
-                    .is_some_and(|s| s.paused);
-                let _ = update(app, |t, _| {
-                    t.set_paused(!paused);
-                    Ok(())
-                });
+            "pause" => toggle_pause(app),
+            "new_match" => {
+                let _ = update(app, |t, now| t.force_new_match(now));
             }
+            "overlay" => toggle_overlay(app),
             "quit" => {
                 save_panel(app);
                 app.exit(0)
@@ -694,6 +746,32 @@ fn open_external(target: &std::ffi::OsStr) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_backups(dir: State<BackupDir>) -> Vec<backup::BackupFile> {
+    backup::list(&dir.0)
+}
+
+/// Recupera una copia de seguridad (por su nombre, de las de `list_backups`).
+#[tauri::command]
+fn restore_backup(app: AppHandle, dir: State<BackupDir>, name: String) -> Result<Stats, String> {
+    let state = app.state::<AppState>();
+    let stats = {
+        let mut tracker = state.0.lock().map_err(|e| e.to_string())?;
+        backup::restore(&mut tracker, &dir.0, &name, now_ms())?;
+        tracker.stats().map_err(|e| e.to_string())?
+    };
+    refresh_tray(&app, &stats);
+    let _ = app.emit("stats-changed", stats);
+    Ok(stats)
+}
+
+/// Todas las partidas terminadas, para exportarlas.
+#[tauri::command]
+fn get_all_matches(state: State<AppState>) -> Result<Vec<store::MatchSummary>, String> {
+    let tracker = state.0.lock().map_err(|e| e.to_string())?;
+    tracker.all_matches().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -791,25 +869,28 @@ fn get_records(state: State<AppState>) -> Result<tracker::Records, String> {
     tracker.records(now_ms()).map_err(|e| e.to_string())
 }
 
-/// Registra el atajo que muestra u oculta el contador y quita el anterior.
-/// Con `accel` vacío no queda ninguno.
-fn set_overlay_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
-    let wanted = if accel.is_empty() {
-        None
-    } else {
-        let shortcut: Shortcut = accel.parse().map_err(|_| {
-            tr("Ese atajo no es válido.", "That shortcut is not valid.").to_string()
-        })?;
-        if shortcut.mods.is_empty() && matches!(shortcut.key, Code::F8 | Code::F9) {
-            return Err(tr(
-                "F8 y F9 están reservadas para el diagnóstico. Elige otra tecla.",
-                "F8 and F9 are reserved for diagnostics. Choose another key.",
-            )
-            .into());
-        }
-        Some(shortcut)
-    };
-    let Some(state) = app.try_state::<OverlayHotkey>() else {
+/// Convierte el texto de un atajo ("Ctrl+Alt+KeyK"); vacío = sin atajo.
+fn parse_hotkey(accel: &str) -> Result<Option<Shortcut>, String> {
+    if accel.is_empty() {
+        return Ok(None);
+    }
+    let shortcut: Shortcut = accel
+        .parse()
+        .map_err(|_| tr("Ese atajo no es válido.", "That shortcut is not valid.").to_string())?;
+    if shortcut.mods.is_empty() && matches!(shortcut.key, Code::F8 | Code::F9) {
+        return Err(tr(
+            "F8 y F9 están reservadas para el diagnóstico. Elige otra tecla.",
+            "F8 and F9 are reserved for diagnostics. Choose another key.",
+        )
+        .into());
+    }
+    Ok(Some(shortcut))
+}
+
+/// Pone en `slot` el atajo `wanted`, registrándolo en el sistema y quitando
+/// el anterior.
+fn set_hotkey_slot(app: &AppHandle, slot: usize, wanted: Option<Shortcut>) -> Result<(), String> {
+    let Some(state) = app.try_state::<Hotkeys>() else {
         return match wanted {
             None => Ok(()),
             Some(_) => Err(tr(
@@ -820,7 +901,7 @@ fn set_overlay_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
         };
     };
     let mut current = state.0.lock().map_err(|e| e.to_string())?;
-    if *current == wanted {
+    if current[slot] == wanted {
         return Ok(());
     }
     let shortcuts = app.global_shortcut();
@@ -833,11 +914,58 @@ fn set_overlay_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
             .to_string()
         })?;
     }
-    if let Some(old) = current.take() {
+    if let Some(old) = current[slot].take() {
         let _ = shortcuts.unregister(old);
     }
-    *current = wanted;
+    current[slot] = wanted;
     Ok(())
+}
+
+/// Registra los dos atajos globales (contador y pausa). Si alguno falla, todo
+/// queda como estaba.
+fn set_global_hotkeys(app: &AppHandle, overlay: &str, pause: &str) -> Result<(), String> {
+    let (overlay, pause) = (parse_hotkey(overlay)?, parse_hotkey(pause)?);
+    if overlay.is_some() && overlay == pause {
+        return Err(tr(
+            "Los dos atajos no pueden ser iguales.",
+            "The two shortcuts can't be the same.",
+        )
+        .into());
+    }
+    let previous = app
+        .try_state::<Hotkeys>()
+        .and_then(|state| state.0.lock().ok().map(|c| *c))
+        .unwrap_or_default();
+    // Primero se sueltan los que cambian, por si se intercambian entre sí.
+    for (slot, wanted) in [(HOTKEY_OVERLAY, overlay), (HOTKEY_PAUSE, pause)] {
+        if previous[slot] != wanted {
+            set_hotkey_slot(app, slot, None)?;
+        }
+    }
+    let result = set_hotkey_slot(app, HOTKEY_OVERLAY, overlay)
+        .and_then(|_| set_hotkey_slot(app, HOTKEY_PAUSE, pause));
+    if result.is_err() {
+        let _ = set_hotkey_slot(app, HOTKEY_OVERLAY, None);
+        let _ = set_hotkey_slot(app, HOTKEY_PAUSE, None);
+        let _ = set_hotkey_slot(app, HOTKEY_OVERLAY, previous[HOTKEY_OVERLAY]);
+        let _ = set_hotkey_slot(app, HOTKEY_PAUSE, previous[HOTKEY_PAUSE]);
+    }
+    result
+}
+
+/// Pausa o reanuda el conteo (menú de la bandeja y atajo global).
+fn toggle_pause(app: &AppHandle) {
+    let paused = app
+        .state::<AppState>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|t| t.stats().ok())
+        .is_some_and(|s| s.paused);
+    let _ = update(app, |t, _| {
+        t.set_paused(!paused);
+        Ok(())
+    });
 }
 
 /// Muestra u oculta el contador (el atajo global): cambia el ajuste, lo
@@ -866,7 +994,7 @@ fn toggle_overlay(app: &AppHandle) {
 /// modo diagnóstico: así no se le quitan esas teclas a otros programas.
 fn set_hotkeys(app: &AppHandle, diag: &Diag, on: bool) {
     // Sin el sistema de atajos (no arrancó) no hay nada que activar.
-    if app.try_state::<OverlayHotkey>().is_none() {
+    if app.try_state::<Hotkeys>().is_none() {
         return;
     }
     let shortcuts = app.global_shortcut();
@@ -1005,12 +1133,17 @@ pub fn run() {
                         if event.state() != ShortcutState::Pressed {
                             return;
                         }
-                        let toggle = app
-                            .try_state::<OverlayHotkey>()
-                            .and_then(|state| state.0.lock().ok().map(|c| *c == Some(*shortcut)))
-                            .unwrap_or(false);
-                        if toggle {
+                        let slot = app.try_state::<Hotkeys>().and_then(|state| {
+                            state
+                                .0
+                                .lock()
+                                .ok()
+                                .and_then(|c| c.iter().position(|s| *s == Some(*shortcut)))
+                        });
+                        if slot == Some(HOTKEY_OVERLAY) {
                             toggle_overlay(app);
+                        } else if slot == Some(HOTKEY_PAUSE) {
+                            toggle_pause(app);
                         } else if shortcut.mods.is_empty()
                             && matches!(shortcut.key, Code::F8 | Code::F9)
                         {
@@ -1020,10 +1153,14 @@ pub fn run() {
                     .build(),
             ) {
                 Ok(()) => {
-                    app.manage(OverlayHotkey(Mutex::new(None)));
+                    app.manage(Hotkeys(Mutex::new([None; 2])));
                     set_hotkeys(app.handle(), &diag, settings.diagnostics);
-                    if let Err(error) = set_overlay_hotkey(app.handle(), &settings.overlay_hotkey) {
-                        diag.log(&format!("atajo del contador: {error}"));
+                    if let Err(error) = set_global_hotkeys(
+                        app.handle(),
+                        &settings.overlay_hotkey,
+                        &settings.pause_hotkey,
+                    ) {
+                        diag.log(&format!("atajos globales: {error}"));
                     }
                 }
                 Err(error) => diag.set_hotkey_error(error.to_string()),
@@ -1126,6 +1263,11 @@ pub fn run() {
             get_records,
             backup_info,
             get_vision_problem,
+            get_detection_waiting,
+            fit_overlay,
+            list_backups,
+            restore_backup,
+            get_all_matches,
             start_overlay_move,
             finish_overlay_move,
             open_backups_dir,

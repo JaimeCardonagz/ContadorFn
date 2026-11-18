@@ -274,6 +274,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 if !hud_on_screen {
                     if !paused {
                         diag.set_paused(true);
+                        crate::set_detection_waiting(&app, true);
                         paused = true;
                     }
                     if overlay_shown {
@@ -286,6 +287,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
             }
             if paused {
                 diag.set_paused(false);
+                crate::set_detection_waiting(&app, false);
                 paused = false;
             }
 
@@ -348,7 +350,9 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
             // El contador se muestra solo con el juego delante: GeForce NOW o
             // Fortnite como ventana activa. En cualquier otra aplicación se oculta.
             if turn.is_multiple_of(5) {
-                let wanted = diag.show_overlay() && capture::game_in_foreground();
+                let wanted = diag.show_overlay()
+                    && (!diag.only_in_match() || matches.in_match())
+                    && capture::game_in_foreground();
                 if wanted != overlay_shown {
                     crate::set_overlay_visible(&app, wanted);
                     if wanted {
