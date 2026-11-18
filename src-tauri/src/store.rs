@@ -60,6 +60,15 @@ pub struct MatchSummary {
     pub counts: Counts,
 }
 
+/// Una partida récord: cuándo empezó, cuánto duró y sus cofres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordMatch {
+    pub started_at: i64,
+    pub duration_ms: i64,
+    pub counts: Counts,
+}
+
 /// Qué eventos sumar.
 #[derive(Debug, Clone, Copy)]
 pub enum Scope {
@@ -142,6 +151,14 @@ impl Store {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         Self::init(conn)
+    }
+
+    /// Copia completa y coherente de la base de datos en `path` (que no debe
+    /// existir). Funciona aunque el programa siga escribiendo.
+    pub fn backup_to(&self, path: &Path) -> Result<()> {
+        self.conn
+            .execute("VACUUM INTO ?1", params![path.to_string_lossy()])
+            .map(|_| ())
     }
 
     #[cfg(test)]
@@ -343,6 +360,83 @@ impl Store {
                 })
             })?
             .collect()
+    }
+
+    /// La partida terminada que encabeza `order` (una expresión SQL sobre
+    /// `total` o `duration`). Solo se usa con las dos órdenes fijas de abajo.
+    fn top_match(&self, order: &str) -> Result<Option<RecordMatch>> {
+        use rusqlite::OptionalExtension;
+        let sql = format!(
+            "SELECT m.started_at, MAX(m.ended_at - m.started_at, 0) AS duration,
+                    COALESCE(SUM(e.chest_type = 'normal'), 0),
+                    COALESCE(SUM(e.chest_type = 'rare'), 0),
+                    COALESCE(SUM(e.chest_type = 'spirit'), 0),
+                    COALESCE(SUM(e.chest_type IN ('normal', 'rare', 'spirit')), 0) AS total
+             FROM matches m LEFT JOIN chest_events e ON e.match_id = m.id
+             WHERE m.ended_at IS NOT NULL
+             GROUP BY m.id
+             ORDER BY {order}, m.started_at ASC
+             LIMIT 1"
+        );
+        self.conn
+            .prepare_cached(&sql)?
+            .query_row([], |r| {
+                let (normal, rare, spirit): (u32, u32, u32) = (r.get(2)?, r.get(3)?, r.get(4)?);
+                Ok(RecordMatch {
+                    started_at: r.get(0)?,
+                    duration_ms: r.get(1)?,
+                    counts: Counts {
+                        normal,
+                        rare,
+                        spirit,
+                        total: normal + rare + spirit,
+                    },
+                })
+            })
+            .optional()
+    }
+
+    /// La partida con más cofres (si hay empate, la primera en lograrlo).
+    /// Una partida sin cofres no es récord.
+    pub fn most_chests_match(&self) -> Result<Option<RecordMatch>> {
+        Ok(self
+            .top_match("total DESC")?
+            .filter(|record| record.counts.total > 0))
+    }
+
+    /// La partida más larga (si hay empate, la primera).
+    pub fn longest_match(&self) -> Result<Option<RecordMatch>> {
+        self.top_match("duration DESC")
+    }
+
+    /// El último cofre contado: (id, instante, tipo).
+    pub fn last_chest(&self) -> Result<Option<(i64, i64, ChestType)>> {
+        use rusqlite::OptionalExtension;
+        let row: Option<(i64, i64, String)> = self
+            .conn
+            .query_row(
+                "SELECT id, ts, chest_type FROM chest_events
+                 WHERE chest_type IN ('normal', 'rare', 'spirit')
+                 ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(id, ts, kind)| {
+            let kind = match kind.as_str() {
+                "normal" => ChestType::Normal,
+                "rare" => ChestType::Rare,
+                "spirit" => ChestType::Spirit,
+                _ => return None,
+            };
+            Some((id, ts, kind))
+        }))
+    }
+
+    pub fn delete_chest(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM chest_events WHERE id = ?1", params![id])?;
+        Ok(())
     }
 
     pub fn matches_in_session(&self, session_id: i64) -> Result<u32> {

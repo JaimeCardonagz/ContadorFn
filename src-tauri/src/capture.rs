@@ -19,7 +19,7 @@ pub struct Frame {
 /// No basta con que el título contenga "Fortnite": también lo contienen una
 /// carpeta, un vídeo o una pestaña del navegador.
 #[cfg(windows)]
-pub fn game_in_foreground() -> bool {
+fn foreground_game_window() -> Option<windows::Win32::Foundation::HWND> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
         OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -56,8 +56,13 @@ pub fn game_in_foreground() -> bool {
             }
             let _ = CloseHandle(process);
         }
-        is_game_window(&program, &title)
+        is_game_window(&program, &title).then_some(window)
     }
+}
+
+#[cfg(windows)]
+pub fn game_in_foreground() -> bool {
+    foreground_game_window().is_some()
 }
 
 #[cfg(not(windows))]
@@ -77,6 +82,124 @@ fn is_game_window(program: &str, title: &str) -> bool {
         || title.contains("geforce now")
 }
 
+/// Zona de la pantalla donde se ve el juego, en píxeles reales del escritorio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Area {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    /// `true` si es la ventana del juego; `false` si es el monitor principal
+    /// (el juego no está delante o no se pudo localizar su ventana).
+    pub window: bool,
+}
+
+impl Area {
+    /// Pasa un rectángulo relativo a la zona (x, y, ancho, alto) a
+    /// coordenadas del escritorio.
+    pub fn absolute(&self, (x, y, w, h): (u32, u32, u32, u32)) -> (i32, i32, u32, u32) {
+        (self.x + x as i32, self.y + y as i32, w, h)
+    }
+
+    /// La parte con imagen: si la ventana es más alta que 16:9, el juego se
+    /// ve con franjas negras arriba y abajo y hay que descontarlas.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn content(self) -> Self {
+        let (w, h) = (self.width as u64, self.height as u64);
+        if w * 9 >= h * 16 {
+            return self;
+        }
+        let visible = (w * 9 / 16) as u32;
+        Self {
+            y: self.y + ((self.height - visible) / 2) as i32,
+            height: visible,
+            ..self
+        }
+    }
+}
+
+/// Dónde está el juego ahora: el área de su ventana si está delante y no
+/// minimizada (vale en cualquier resolución, en ventana o en otro monitor);
+/// si no, el monitor principal.
+pub fn game_area() -> Result<Area, String> {
+    #[cfg(windows)]
+    if let Some(area) = foreground_game_area() {
+        return Ok(area.content());
+    }
+    let (width, height) = screen_size()?;
+    Ok(Area {
+        x: 0,
+        y: 0,
+        width,
+        height,
+        window: false,
+    })
+}
+
+/// Tamaño mínimo de la ventana del juego para poder leer el aviso.
+#[cfg_attr(not(windows), allow(dead_code))]
+const MIN_WIDTH: u32 = 320;
+#[cfg_attr(not(windows), allow(dead_code))]
+const MIN_HEIGHT: u32 = 180;
+
+/// ¿Está delante la ventana del juego pero es demasiado pequeña para leerla?
+/// (Minimizada no cuenta: entonces no se está jugando.)
+pub fn game_window_too_small() -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, IsIconic};
+
+        let Some(window) = foreground_game_window() else {
+            return false;
+        };
+        // SAFETY: `window` es una ventana válida y la estructura es local.
+        unsafe {
+            let mut rect = RECT::default();
+            if IsIconic(window).as_bool() || GetClientRect(window, &mut rect).is_err() {
+                return false;
+            }
+            let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
+            width > 0 && height > 0 && (width < MIN_WIDTH as i32 || height < MIN_HEIGHT as i32)
+        }
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+#[cfg(windows)]
+fn foreground_game_area() -> Option<Area> {
+    use windows::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, IsIconic};
+
+    let window = foreground_game_window()?;
+    // SAFETY: `window` es una ventana válida y las estructuras son locales.
+    unsafe {
+        if IsIconic(window).as_bool() {
+            return None;
+        }
+        let mut rect = RECT::default();
+        GetClientRect(window, &mut rect).ok()?;
+        let mut origin = POINT::default();
+        if !ClientToScreen(window, &mut origin).as_bool() {
+            return None;
+        }
+        let (width, height) = (
+            (rect.right - rect.left) as u32,
+            (rect.bottom - rect.top) as u32,
+        );
+        // Ventanas diminutas (o a medio crear): no sirven para leer nada.
+        (width >= MIN_WIDTH && height >= MIN_HEIGHT).then_some(Area {
+            x: origin.x,
+            y: origin.y,
+            width,
+            height,
+            window: true,
+        })
+    }
+}
+
 /// Captura el monitor principal completo.
 pub fn grab_screen() -> Result<Frame, String> {
     let (width, height) = screen_size()?;
@@ -89,7 +212,7 @@ pub fn screen_size() -> Result<(u32, u32), String> {
 }
 
 #[cfg(not(windows))]
-pub fn grab_rect(_x: u32, _y: u32, _width: u32, _height: u32) -> Result<Frame, String> {
+pub fn grab_rect(_x: i32, _y: i32, _width: u32, _height: u32) -> Result<Frame, String> {
     Err(unsupported())
 }
 
@@ -120,7 +243,7 @@ pub fn screen_size() -> Result<(u32, u32), String> {
 
 /// Captura un rectángulo del monitor principal.
 #[cfg(windows)]
-pub fn grab_rect(x: u32, y: u32, width: u32, height: u32) -> Result<Frame, String> {
+pub fn grab_rect(x: i32, y: i32, width: u32, height: u32) -> Result<Frame, String> {
     use windows::Win32::Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
         DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SRCCOPY, SelectObject,
@@ -145,17 +268,7 @@ pub fn grab_rect(x: u32, y: u32, width: u32, height: u32) -> Result<Frame, Strin
         let memory = CreateCompatibleDC(Some(screen));
         let bitmap = CreateCompatibleBitmap(screen, w, h);
         let previous = SelectObject(memory, bitmap.into());
-        let copied = BitBlt(
-            memory,
-            0,
-            0,
-            w,
-            h,
-            Some(screen),
-            x as i32,
-            y as i32,
-            SRCCOPY,
-        );
+        let copied = BitBlt(memory, 0, 0, w, h, Some(screen), x, y, SRCCOPY);
         // GetDIBits exige que el bitmap ya no esté seleccionado en ningún DC.
         SelectObject(memory, previous);
 
@@ -248,5 +361,56 @@ mod tests {
             "fortnite chest counter"
         ));
         assert!(!is_game_window("", ""));
+    }
+
+    use super::Area;
+
+    #[test]
+    fn una_ventana_mas_alta_que_16_9_descuenta_las_franjas_negras() {
+        let tall = Area {
+            x: 100,
+            y: 50,
+            width: 1280,
+            height: 1024,
+            window: true,
+        };
+        assert_eq!(
+            tall.content(),
+            Area {
+                x: 100,
+                y: 50 + 152,
+                width: 1280,
+                height: 720,
+                window: true
+            }
+        );
+        let wide = Area {
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1080,
+            window: true,
+        };
+        assert_eq!(wide.content(), wide, "16:9 o más ancha: sin cambios");
+        let exact = Area {
+            x: -1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            window: true,
+        };
+        assert_eq!(exact.content(), exact);
+    }
+
+    #[test]
+    fn las_zonas_se_desplazan_al_sitio_de_la_ventana() {
+        let area = Area {
+            x: -1920,
+            y: 40,
+            width: 1920,
+            height: 1080,
+            window: true,
+        };
+        assert_eq!(area.absolute((10, 20, 30, 40)), (-1910, 60, 30, 40));
     }
 }

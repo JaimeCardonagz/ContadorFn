@@ -4,6 +4,7 @@
   import { texts, type Lang } from "$lib/i18n";
   import OverlayText from "$lib/OverlayText.svelte";
   import Help from "$lib/Help.svelte";
+  import { clock } from "$lib/format";
 
   type Counts = { normal: number; rare: number; spirit: number; total: number };
   type Stats = {
@@ -15,6 +16,8 @@
     totalCounts: Counts;
     sessionMatches: number;
     totalMatches: number;
+    lastChest: { kind: string; at: number } | null;
+    paused: boolean;
   };
 
   type Diag = {
@@ -35,6 +38,9 @@
     lastDetected: string | null;
     detectError: string | null;
     hudVisible: boolean;
+    gameWidth: number;
+    gameHeight: number;
+    gameWindow: boolean;
   };
 
   type Binding =
@@ -52,6 +58,12 @@
     saveSamples: boolean;
     diagnostics: boolean;
     checkUpdates: boolean;
+    closeToTray: boolean;
+    startWithWindows: boolean;
+    matchSummary: boolean;
+    overlayHotkey: string;
+    overlayX: number;
+    overlayY: number;
     overlayMatch: string;
     overlayTotal: boolean;
     overlayChests: string;
@@ -80,6 +92,25 @@
   $effect(() => {
     if (tab === "history") loadHistory();
   });
+
+  // Récords: la partida con más cofres, la más larga y el promedio de 24 h.
+  type RecordMatch = { startedAt: number; durationMs: number; counts: Counts };
+  type Records = {
+    mostChests: RecordMatch | null;
+    longest: RecordMatch | null;
+    dayMatches: number;
+    dayChests: number;
+  };
+  let records = $state<Records | null>(null);
+  const loadRecords = () =>
+    invoke<Records>("get_records")
+      .then((value) => (records = value))
+      .catch((e) => (error = String(e)));
+  $effect(() => {
+    if (tab === "stats") loadRecords();
+  });
+  const day = (ms: number) =>
+    new Date(ms).toLocaleDateString(lang === "en" ? "en-US" : "es-MX", { day: "numeric", month: "short" });
 
   // Sin modo diagnóstico no hay pestaña Diagnóstico.
   $effect(() => {
@@ -137,6 +168,9 @@
 
   onMount(() => {
     run("get_stats");
+    invoke<Problem>("get_vision_problem")
+      .then((value) => (problem = value))
+      .catch(() => {});
     appVersion().then((value) => (version = value));
     invoke<boolean>("is_debug").then((value) => (debug = value));
     invoke<Diag>("get_diag").then((value) => (diag = value));
@@ -155,7 +189,12 @@
       listen<Stats>("stats-changed", (event) => {
         stats = event.payload;
         if (tab === "history") loadHistory();
+        if (tab === "stats") loadRecords();
       }),
+      // El atajo global cambia "Mostrar contador" sin pasar por el panel.
+      listen<Settings>("settings-changed", (event) => (settings = event.payload)),
+      listen<Problem>("vision-problem", (event) => (problem = event.payload)),
+      listen<boolean>("overlay-moving", (event) => (movingOverlay = event.payload)),
       listen<Diag>("diag-state", (event) => (diag = event.payload)),
       listen<string>("diag-thumbnail", (event) => (thumbnail = event.payload)),
     ];
@@ -166,16 +205,6 @@
     };
   });
 
-  /** Duración legible: "23 min 05 s", o "1 h 02 min" si pasa de una hora. */
-  function clock(ms: number) {
-    const s = Math.max(0, Math.round(ms / 1000));
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const h = Math.floor(s / 3600);
-    const m = Math.floor(s / 60) % 60;
-    if (h > 0) return `${h} h ${pad(m)} min`;
-    return m > 0 ? `${m} min ${pad(s % 60)} s` : `${s} s`;
-  }
-
   function elapsed(since: number | null) {
     if (since === null) return "";
     const s = Math.max(0, Math.floor((now - since) / 1000));
@@ -183,19 +212,63 @@
     return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
   }
 
-  // Primera vez: lo que el jugador ya llevaba antes de usar el programa.
-  let initial = $state({ normal: 0, rare: 0, spirit: 0, matches: 0 });
+  // Primera vez (o al reiniciar): lo que el jugador ya llevaba. Dos pasos:
+  // escribir los números (validados) y revisar el resumen antes de borrar.
+  type SetupField = "normal" | "rare" | "spirit" | "matches";
+  const SETUP_MAX = 1_000_000;
+  let initial = $state<Record<SetupField, number | null>>({ normal: 0, rare: 0, spirit: 0, matches: 0 });
+  let setupStep = $state<"form" | "review">("form");
+
+  /** Error de un campo, o "" si vale. Vacío cuenta como 0. */
+  function setupError(value: number | null): string {
+    if (value === null || value === undefined || Number.isNaN(value)) return "";
+    if (!Number.isInteger(value) || value < 0) return t.setupInvalid;
+    if (value > SETUP_MAX) return t.setupTooBig;
+    return "";
+  }
+  const setupValue = (value: number | null) => (value === null || Number.isNaN(value) ? 0 : value);
+  const setupValid = $derived((Object.values(initial) as (number | null)[]).every((v) => setupError(v) === ""));
+  const setupTotal = $derived(setupValue(initial.normal) + setupValue(initial.rare) + setupValue(initial.spirit));
+  // Al reiniciar hay datos que se van a borrar: se enseñan en el resumen.
+  const hadData = $derived(!!stats && (stats.totalCounts.total > 0 || stats.totalMatches > 0));
+
+  function reviewSetup() {
+    if (setupValid) setupStep = "review";
+  }
 
   async function finishSetup() {
-    const whole = (n: number) => Math.max(0, Math.trunc(n || 0));
     await run("initial_setup", {
-      normal: whole(initial.normal),
-      rare: whole(initial.rare),
-      spirit: whole(initial.spirit),
-      matches: whole(initial.matches),
+      normal: setupValue(initial.normal),
+      rare: setupValue(initial.rare),
+      spirit: setupValue(initial.spirit),
+      matches: setupValue(initial.matches),
     });
-    if (!error) await save({ setupDone: true });
+    if (!error) {
+      await save({ setupDone: true });
+      setupStep = "form";
+    }
   }
+
+  /** Al reiniciar, volver atrás sin borrar nada. */
+  async function cancelReset() {
+    setupStep = "form";
+    await save({ setupDone: true });
+  }
+
+  /** Enfoca el elemento al aparecer (primer campo, botón de confirmar). */
+  function autofocus(node: HTMLElement) {
+    // En el siguiente fotograma: al montarse, la ventana aún puede estar
+    // terminando de pintar y el foco se perdería.
+    setTimeout(() => node.focus(), 50);
+  }
+
+  // Deshacer el último cofre: solo si es de los últimos 5 minutos.
+  const UNDO_WINDOW_MS = 5 * 60 * 1000;
+  let confirmingUndo = $state(false);
+  const undoable = $derived(stats?.lastChest && now - stats.lastChest.at <= UNDO_WINDOW_MS ? stats.lastChest : null);
+  $effect(() => {
+    if (!undoable) confirmingUndo = false;
+  });
 
   // Reiniciar: pide confirmación y vuelve a la pantalla inicial.
   let confirmingReset = $state(false);
@@ -230,11 +303,110 @@
     save({ binding: { device: "mouse", button: event.button } });
   }
 
+  // Atajo global para mostrar u ocultar el contador, como "Ctrl+Shift+KeyO".
+  let capturingHotkey = $state(false);
+  let hotkeyHint = $state("");
+  const MODIFIER_KEYS = ["Control", "Shift", "Alt", "Meta", "AltGraph"];
+
+  /** Partes legibles del atajo: "Ctrl+Shift+KeyO" → ["Ctrl", "Shift", "O"]. */
+  const hotkeyParts = (accel: string) =>
+    accel.split("+").map((part) => part.replace(/^Key/, "").replace(/^Digit/, ""));
+
+  function startHotkeyCapture() {
+    hotkeyHint = "";
+    setTimeout(() => (capturingHotkey = true), 200);
+  }
+
+  async function captureHotkey(event: KeyboardEvent) {
+    if (!capturingHotkey || !settings) return;
+    event.preventDefault();
+    if (event.key === "Escape") {
+      capturingHotkey = false;
+      return;
+    }
+    if (MODIFIER_KEYS.includes(event.key)) return; // falta la tecla principal
+    const fn = /^F([1-9]|1[0-2])$/.test(event.code);
+    const main = /^(Key[A-Z]|Digit[0-9])$/.test(event.code) || fn;
+    if (!main) {
+      hotkeyHint = t.hotkeyInvalid;
+      return;
+    }
+    // Sin Ctrl ni Alt, una letra o un número se le quitaría al juego al escribir.
+    if (!fn && !event.ctrlKey && !event.altKey) {
+      hotkeyHint = t.hotkeyNeedsModifier;
+      return;
+    }
+    if (fn && ["F8", "F9"].includes(event.code) && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+      hotkeyHint = t.hotkeyReserved;
+      return;
+    }
+    const accel = [
+      event.ctrlKey && "Ctrl",
+      event.altKey && "Alt",
+      event.shiftKey && "Shift",
+      event.code,
+    ]
+      .filter(Boolean)
+      .join("+");
+    capturingHotkey = false;
+    await saveHotkey(accel);
+  }
+
+  /** Guarda el atajo; si el sistema lo rechaza (otro programa lo usa), vuelve al anterior. */
+  async function saveHotkey(accel: string) {
+    if (!settings) return;
+    const previous = settings.overlayHotkey;
+    await save({ overlayHotkey: accel });
+    if (error) {
+      hotkeyHint = error;
+      error = "";
+      settings = { ...settings, overlayHotkey: previous };
+    } else {
+      hotkeyHint = "";
+    }
+  }
+
+  // Copias de seguridad automáticas (una al día, las 7 últimas).
+  type BackupInfo = { count: number; latest: string | null };
+  let backups = $state<BackupInfo | null>(null);
+  $effect(() => {
+    if (tab === "settings") invoke<BackupInfo>("backup_info").then((value) => (backups = value)).catch(() => {});
+  });
+  /** "2026-11-18" → "18 nov", con la fecha local (sin desfase por zona horaria). */
+  const backupDay = (iso: string) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(lang === "en" ? "en-US" : "es-MX", { day: "numeric", month: "short" });
+  };
+
+  // Aviso si el programa no consigue ver el juego, con una pista de qué hacer.
+  type Problem = "none" | "capture" | "black" | "small";
+  let problem = $state<Problem>("none");
+
+  // Colocar el contador arrastrándolo.
+  let movingOverlay = $state(false);
+  async function moveOverlay(start: boolean, saveIt = false) {
+    try {
+      if (start) {
+        await invoke("start_overlay_move");
+        movingOverlay = true;
+      } else {
+        settings = await invoke<Settings>("finish_overlay_move", { save: saveIt });
+        movingOverlay = false;
+      }
+      error = "";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   const simulated = ["match_start", "normal", "rare", "spirit", "eliminated", "victory", "lobby"];
 </script>
 
 <svelte:window
-  onkeydown={captureKey}
+  onkeydown={(event) => {
+    captureHotkey(event);
+    captureKey(event);
+  }}
   onmousedowncapture={captureMouse}
   oncontextmenu={(event) => event.preventDefault()}
 />
@@ -249,23 +421,71 @@
 
 <main>
   {#if settings && !settings.setupDone}
-    <h2>{t.setupTitle}</h2>
-    <small class="linea">{t.setupHelp}</small>
-    <form class="inicio" onsubmit={(e) => (e.preventDefault(), finishSetup())}>
-      {#each ["normal", "rare", "spirit"] as const as kind}
-        <label>
-          {t.setupChests(t.kinds[kind])}
-          <input type="number" min="0" step="1" bind:value={initial[kind]} />
-        </label>
-      {/each}
-      <label>
-        {t.setupMatches}
-        <input type="number" min="0" step="1" bind:value={initial.matches} />
-      </label>
-      <nav>
-        <button type="submit">{t.setupStart}</button>
-      </nav>
-    </form>
+    {#if setupStep === "form"}
+      <h2>{t.setupTitle}</h2>
+      <small class="linea">{t.setupHelp}</small>
+      <form class="inicio" novalidate onsubmit={(e) => (e.preventDefault(), reviewSetup())}>
+        {#each ["normal", "rare", "spirit", "matches"] as const as field, i}
+          {@const problem = setupError(initial[field])}
+          <div class="campo">
+            <label>
+              <span>{field === "matches" ? t.setupMatches : t.setupChests(t.kinds[field])}</span>
+              {#if i === 0}
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputmode="numeric"
+                  placeholder="0"
+                  bind:value={initial[field]}
+                  aria-invalid={problem !== ""}
+                  aria-describedby={problem ? `error-${field}` : undefined}
+                  use:autofocus
+                />
+              {:else}
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputmode="numeric"
+                  placeholder="0"
+                  bind:value={initial[field]}
+                  aria-invalid={problem !== ""}
+                  aria-describedby={problem ? `error-${field}` : undefined}
+                />
+              {/if}
+            </label>
+            {#if problem}<small class="error-campo" id={`error-${field}`}>{problem}</small>{/if}
+          </div>
+        {/each}
+        <small class="linea">{t.setupEnter}</small>
+        <nav class="botones">
+          <button type="submit" class="principal" disabled={!setupValid}>{t.setupNext}</button>
+          {#if hadData}
+            <button type="button" onclick={cancelReset}>{t.setupCancelReset}</button>
+          {/if}
+        </nav>
+      </form>
+    {:else}
+      <h2>{t.setupReview}</h2>
+      <small class="linea">{t.setupReviewHelp}</small>
+      <form class="inicio" onsubmit={(e) => (e.preventDefault(), finishSetup())}>
+        <dl class="resumen">
+          {#each ["normal", "rare", "spirit"] as const as kind}
+            <div><dt>{t.kinds[kind]}</dt><dd>{setupValue(initial[kind])}</dd></div>
+          {/each}
+          <div class="suma"><dt>{t.allChests}</dt><dd>{setupTotal}</dd></div>
+          <div><dt>{t.matchesPlayed}</dt><dd>{setupValue(initial.matches)}</dd></div>
+        </dl>
+        {#if hadData && stats}
+          <p class="borrar" role="note">{t.setupErase(stats.totalCounts.total, stats.totalMatches)}</p>
+        {/if}
+        <nav class="botones">
+          <button type="submit" class="principal" use:autofocus>{t.setupConfirm}</button>
+          <button type="button" onclick={() => (setupStep = "form")}>{t.setupBack}</button>
+        </nav>
+      </form>
+    {/if}
   {:else}
   {#if update}
     <div class="aviso" role="status">
@@ -285,6 +505,13 @@
     </div>
   {/if}
 
+  {#if problem !== "none" && t.problems[problem]}
+    <div class="problema" role="alert">
+      <strong>{t.problems[problem].title}</strong>
+      <span>{t.problems[problem].hint}</span>
+    </div>
+  {/if}
+
   <div class="tabs">
     {#each (["counter", "stats", "history", "settings", "diag"] as const).filter((name) => name !== "diag" || settings?.diagnostics) as name}
       <button class:actual={tab === name} onclick={() => (tab = name)}>{t.tabs[name]}</button>
@@ -292,9 +519,16 @@
   </div>
 
   {#if tab === "counter" && stats}
-    <header class:activo={stats.inMatch}>
-      <i></i>{stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
+    <header class:activo={stats.inMatch && !stats.paused} class:pausa={stats.paused}>
+      <i></i>{stats.paused ? t.pausedState : stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
     </header>
+
+    {#if stats.paused}
+      <div class="pausado" role="status">
+        <span><strong>{t.pausedTitle}</strong>{t.pausedHint}</span>
+        <button class="principal" onclick={() => run("set_paused", { paused: false })}>{t.resume}</button>
+      </div>
+    {/if}
 
     <section>
       <div class="fila"><span>{t.match}</span><strong>{stats.matchCounts.total}</strong></div>
@@ -319,8 +553,34 @@
     <nav>
       <button onclick={() => run("start_session")} disabled={stats.sessionActive}>{t.start}</button>
       <button onclick={() => run("stop_session")} disabled={!stats.sessionActive}>{t.stop}</button>
-      <button onclick={() => run("new_match")}>{t.newMatch}</button>
+      <button onclick={() => run("new_match")} disabled={stats.paused}>{t.newMatch}</button>
+      {#if !stats.paused}
+        <button onclick={() => run("set_paused", { paused: true })}>{t.pause}</button>
+      {/if}
     </nav>
+
+    {#if undoable}
+      <section class="deshacer">
+        {#if confirmingUndo}
+          <span>{t.undoConfirm(t.kindNames[undoable.kind] ?? undoable.kind)}</span>
+          <span class="botones">
+            <button
+              class="peligro"
+              onclick={() => {
+                confirmingUndo = false;
+                run("undo_last_chest");
+              }}
+            >
+              {t.undoYes}
+            </button>
+            <button onclick={() => (confirmingUndo = false)}>{t.cancel}</button>
+          </span>
+        {:else}
+          <span>{t.lastCounted(t.kindNames[undoable.kind] ?? undoable.kind, Math.max(0, Math.round((now - undoable.at) / 1000)))}</span>
+          <button onclick={() => (confirmingUndo = true)}>{t.undo}</button>
+        {/if}
+      </section>
+    {/if}
   {/if}
 
   {#if tab === "stats" && stats}
@@ -346,6 +606,37 @@
       </tbody>
     </table>
     <div class="fila"><span>{t.matchesPlayed}</span><strong>{games}</strong></div>
+    {#if records}
+      {@const most = records.mostChests}
+      {@const longest = records.longest}
+      <section class="records" aria-labelledby="titulo-records">
+        <div class="fila"><span id="titulo-records">{t.recordsTitle}</span></div>
+        <dl>
+          <div>
+            <dt>{t.recordMostChests}</dt>
+            <dd>
+              <b>{most ? most.counts.total : "—"}</b>
+              {#if most}<small>{day(most.startedAt)} · {clock(most.durationMs)}</small>{/if}
+            </dd>
+          </div>
+          <div>
+            <dt>{t.recordLongest}</dt>
+            <dd>
+              <b>{longest ? clock(longest.durationMs) : "—"}</b>
+              {#if longest}<small>{day(longest.startedAt)} · {t.summaryChests(longest.counts.total, true)}</small>{/if}
+            </dd>
+          </div>
+          <div>
+            <dt>{t.recordDayAverage}<Help text={t.help.recordDayAverage} /></dt>
+            <dd>
+              <b>{records.dayMatches > 0 ? (records.dayChests / records.dayMatches).toFixed(1) : "—"}</b>
+              {#if records.dayMatches > 0}<small>{t.historySummary(records.dayMatches, records.dayChests)}</small>{/if}
+            </dd>
+          </div>
+        </dl>
+        {#if !most && !longest}<p class="vacio">{t.recordsEmpty}</p>{/if}
+      </section>
+    {/if}
   {/if}
 
   {#if tab === "history"}
@@ -383,6 +674,34 @@
           <option value="en">English</option>
         </select>
       </div>
+      <label class="opcion">
+        <span>{t.startWithWindows}<Help text={t.help.startWithWindows} /></span>
+        <input
+          type="checkbox"
+          checked={settings.startWithWindows}
+          onchange={(e) => save({ startWithWindows: e.currentTarget.checked })}
+        />
+      </label>
+      <div class="opcion">
+        <span>{t.onClose}<Help text={t.help.onClose} /></span>
+        <select
+          value={settings.closeToTray ? "tray" : "exit"}
+          onchange={(e) => save({ closeToTray: e.currentTarget.value === "tray" })}
+        >
+          <option value="tray">{t.closeTray}</option>
+          <option value="exit">{t.closeExit}</option>
+        </select>
+      </div>
+      <div class="opcion">
+        <span>{t.gameArea}<Help text={t.help.gameArea} /></span>
+        <b>
+          {#if diag?.gameWidth}
+            {diag.gameWidth} × {diag.gameHeight} · {diag.gameWindow ? t.gameWindow : t.gameScreen}
+          {:else}
+            —
+          {/if}
+        </b>
+      </div>
     </section>
 
     <section>
@@ -396,6 +715,31 @@
         />
       </label>
       <div class="opcion">
+        <span>{t.hotkey}<Help text={t.help.hotkey} /></span>
+        <span class="atajo" aria-live="polite">
+          {#if capturingHotkey}
+            <em>{t.hotkeyPress}</em>
+          {:else if settings.overlayHotkey}
+            {#each hotkeyParts(settings.overlayHotkey) as part, i}
+              {#if i > 0}<span aria-hidden="true">+</span>{/if}<kbd>{part}</kbd>
+            {/each}
+          {:else}
+            <em>{t.hotkeyNone}</em>
+          {/if}
+        </span>
+      </div>
+      <nav class="botones">
+        <button onclick={startHotkeyCapture} disabled={capturingHotkey}>
+          {settings.overlayHotkey ? t.changeKey : t.hotkeyAssign}
+        </button>
+        {#if capturingHotkey}
+          <button onclick={() => (capturingHotkey = false)}>{t.cancel}</button>
+        {:else if settings.overlayHotkey}
+          <button onclick={() => saveHotkey("")}>{t.hotkeyRemove}</button>
+        {/if}
+      </nav>
+      {#if hotkeyHint}<p class="aviso-atajo" role="alert">{hotkeyHint}</p>{/if}
+      <div class="opcion">
         <span>{t.corner}</span>
         <select value={settings.corner} onchange={(e) => save({ corner: e.currentTarget.value })}>
           {#each Object.entries(t.corners) as [value, name]}
@@ -403,6 +747,15 @@
           {/each}
         </select>
       </div>
+      <nav class="botones">
+        {#if movingOverlay}
+          <button class="principal" onclick={() => moveOverlay(false, true)}>{t.moveSave}</button>
+          <button onclick={() => moveOverlay(false)}>{t.cancel}</button>
+        {:else}
+          <button onclick={() => moveOverlay(true)}>{t.moveOverlay}</button>
+        {/if}
+      </nav>
+      {#if movingOverlay}<p class="nota-mover" role="status">{t.moveHint}</p>{/if}
       <div class="opcion">
         <span>{t.optMatch}<Help text={t.help.optMatch} /></span>
         <select value={settings.overlayMatch} onchange={(e) => save({ overlayMatch: e.currentTarget.value })}>
@@ -411,6 +764,14 @@
           <option value="total">{t.optAllTime}</option>
         </select>
       </div>
+      <label class="opcion">
+        <span>{t.optSummary}<Help text={t.help.optSummary} /></span>
+        <input
+          type="checkbox"
+          checked={settings.matchSummary}
+          onchange={(e) => save({ matchSummary: e.currentTarget.checked })}
+        />
+      </label>
       <label class="opcion">
         <span>{t.optTotal}</span>
         <input
@@ -518,6 +879,15 @@
           onchange={(e) => save({ diagnostics: e.currentTarget.checked })}
         />
       </label>
+      <div class="opcion">
+        <span>{t.backups}<Help text={t.help.backups} /></span>
+        <span class="botones">
+          {#if backups}
+            <small>{backups.latest ? t.backupsSummary(backups.count, backupDay(backups.latest)) : t.backupsNone}</small>
+          {/if}
+          <button onclick={() => invoke("open_backups_dir").catch((e) => (error = String(e)))}>{t.openFolder}</button>
+        </span>
+      </div>
     </section>
 
     <section>
@@ -635,6 +1005,7 @@
     --primary-soft: #a78bfa;
     --accent: #f43f5e;
     --danger: #f87171;
+    --warn: #fbbf24;
     --ok: #4ade80;
     /* Un color por tipo de contenedor, parecido al del juego. */
     --tesoro: #fbbf24;
@@ -714,6 +1085,38 @@
   header.activo i {
     background: var(--ok);
     box-shadow: 0 0 8px var(--ok);
+  }
+
+  header.pausa {
+    color: var(--warn);
+  }
+
+  header.pausa i {
+    border-radius: 2px;
+    background: var(--warn);
+  }
+
+  /* Conteo en pausa: bien visible, con el botón para reanudar. */
+  .pausado {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    padding: 10px 12px 10px 14px;
+    border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
+    border-left: 4px solid var(--warn);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--warn) 10%, var(--card));
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .pausado strong {
+    display: block;
+    font-size: 14px;
+    line-height: 1.3;
+    color: var(--warn);
   }
 
   section {
@@ -904,6 +1307,7 @@
   .botones {
     display: inline-flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
   }
 
@@ -926,6 +1330,70 @@
     font-size: 14px;
   }
 
+  .inicio input[type="number"] {
+    width: 9em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .inicio input[aria-invalid="true"] {
+    border-color: var(--danger);
+    outline-color: var(--danger);
+  }
+
+  .campo {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .error-campo {
+    align-self: flex-end;
+    color: var(--danger);
+    font-size: 12px;
+  }
+
+  .resumen {
+    margin: 0;
+    padding: 4px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  .resumen div {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+  }
+
+  .resumen div:first-child {
+    border-top: none;
+  }
+
+  .resumen dd {
+    margin: 0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .resumen .suma {
+    color: var(--primary-soft);
+    font-weight: 700;
+  }
+
+  .borrar {
+    margin: 0;
+    padding: 10px 12px;
+    border-left: 4px solid var(--danger);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--danger) 10%, var(--card));
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
   /* Aviso de versión nueva: se queda hasta que se cierra, porque lleva una acción. */
   .aviso {
     display: flex;
@@ -941,6 +1409,28 @@
     font-weight: 600;
   }
 
+  /* Aviso de que no se ve el juego: título y pista de qué hacer. */
+  .problema {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px 10px 14px;
+    border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
+    border-left: 4px solid var(--warn);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--warn) 10%, var(--card));
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-muted);
+  }
+
+  .problema strong {
+    font-size: 14px;
+    line-height: 1.3;
+    letter-spacing: 0;
+    color: var(--warn);
+  }
+
   button.principal {
     background: var(--primary);
     border-color: var(--primary);
@@ -952,6 +1442,15 @@
     padding: 0 10px;
     font-size: 18px;
     line-height: 1;
+  }
+
+  .deshacer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    font-size: 14px;
   }
 
   .historial {
@@ -986,6 +1485,91 @@
 
   .historial strong {
     font-size: 24px;
+  }
+
+  .atajo {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-muted);
+  }
+
+  .atajo em {
+    font-style: normal;
+    font-size: 13px;
+  }
+
+  kbd {
+    min-width: 24px;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    background: var(--muted);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .nota-mover {
+    margin: 4px 0 6px;
+    color: var(--warn);
+    font-size: 13px;
+  }
+
+  .aviso-atajo {
+    margin: 4px 0 6px;
+    color: var(--danger);
+    font-size: 13px;
+  }
+
+  .records {
+    margin-top: 12px;
+  }
+
+  .records dl {
+    margin: 8px 0 0;
+  }
+
+  .records dl > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .records dl > div:first-child {
+    border-top: none;
+  }
+
+  .records dt {
+    display: inline-flex;
+    align-items: center;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .records dd {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .records dd b {
+    font-size: 18px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .records dd small {
+    font-size: 12px;
   }
 
   /* Versión instalada, discreta al pie de Configuración. */

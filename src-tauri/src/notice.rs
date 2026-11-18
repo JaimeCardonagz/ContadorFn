@@ -776,6 +776,47 @@ mod tests {
         }
     }
 
+    /// El juego en una ventana de 1600×900, desplazada dentro de un escritorio
+    /// de 2560×1440 (como en otro monitor o en modo ventana): la zona del aviso
+    /// se calcula sobre la ventana y el aviso real se sigue leyendo.
+    #[test]
+    fn lee_el_aviso_con_el_juego_en_ventana_a_otra_resolucion() {
+        use crate::capture::Area;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/frames/normal_a_48.8.png");
+        let Ok(frame) = image::open(&path) else {
+            eprintln!("sin fotograma real: prueba omitida");
+            return;
+        };
+        let game = imageops::resize(&frame.into_rgb8(), 1600, 900, FilterType::CatmullRom);
+        let mut desktop = image::RgbImage::new(2560, 1440);
+        imageops::overlay(&mut desktop, &game, 700, 300);
+        let area = Area {
+            x: 700,
+            y: 300,
+            width: 1600,
+            height: 900,
+            window: true,
+        };
+        let (x, y, w, h) = area.absolute(roi_rect(area.width, area.height));
+        let crop = imageops::crop_imm(&desktop, x as u32, y as u32, w, h).to_image();
+        let roi = Frame {
+            width: w,
+            height: h,
+            rgb: crop.into_raw(),
+        };
+        assert_eq!(read(&roi), Reading::Known(ChestType::Normal));
+
+        // En cambio, leyendo como si el juego ocupara toda la pantalla, no.
+        let (x, y, w, h) = roi_rect(2560, 1440);
+        let wrong = imageops::crop_imm(&desktop, x, y, w, h).to_image();
+        let roi = Frame {
+            width: w,
+            height: h,
+            rgb: wrong.into_raw(),
+        };
+        assert_ne!(read(&roi), Reading::Known(ChestType::Normal));
+    }
+
     /// Fotogramas completos a 1366×768 sacados de los vídeos de OBS (locales,
     /// no están en el repositorio).
     #[test]

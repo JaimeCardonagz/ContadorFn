@@ -7,7 +7,7 @@
 //! aviso desaparezca (~2 s) cuentan como uno. Se resolverá al añadir el
 //! recuadro "BUSCAR" y el anillo (`detect.rs`), que distinguen cada apertura.
 
-use crate::capture::{self, Frame};
+use crate::capture::{self, Area, Frame};
 use crate::detect::{S1_PROMPT, S2_TYPE, S3_INPUT, S4_PROGRESS, S5_NOTICE};
 use crate::diag::Diag;
 use crate::fuse::{self, FuseCounter};
@@ -15,6 +15,7 @@ use crate::notice::{self, Reading, Suffix};
 use crate::now_ms;
 use crate::scene::{self, MatchEvent, MatchWatcher};
 use crate::store::{ChestType, EndReason};
+use crate::vision::{Problem, Vision, is_black};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
@@ -22,6 +23,10 @@ use tauri::AppHandle;
 const INTERVAL: Duration = Duration::from_millis(100);
 /// Cada cuántas vueltas se mira si está el HUD de partida (una vez por segundo).
 const SCENE_EVERY: u32 = 10;
+/// Sin el juego delante el análisis se pausa: el bucle va más despacio y solo
+/// mira, cada `PAUSED_HUD_EVERY` vueltas (2 s), si se ve el HUD de partida.
+const PAUSED_INTERVAL: Duration = Duration::from_millis(500);
+const PAUSED_HUD_EVERY: u32 = 4;
 /// Espera antes de reintentar cuando no se puede capturar.
 const RETRY: Duration = Duration::from_secs(5);
 /// Lecturas seguidas del mismo tipo para darlo por visto.
@@ -168,15 +173,18 @@ impl NoticeCounter {
     }
 }
 
-fn grab_health_bar() -> Result<Frame, String> {
-    let (_, height) = capture::screen_size()?;
-    let (x, y, w, h) = scene::zone_rect(height);
+fn grab_health_bar(area: &Area) -> Result<Frame, String> {
+    let (x, y, w, h) = area.absolute(scene::zone_rect(area.height));
     capture::grab_rect(x, y, w, h)
 }
 
-fn grab_notice_zone() -> Result<Frame, String> {
-    let (width, height) = capture::screen_size()?;
-    let (x, y, w, h) = notice::roi_rect(width, height);
+fn grab_notice_zone(area: &Area) -> Result<Frame, String> {
+    let (x, y, w, h) = area.absolute(notice::roi_rect(area.width, area.height));
+    capture::grab_rect(x, y, w, h)
+}
+
+fn grab_fuse_zone(area: &Area) -> Result<Frame, String> {
+    let (x, y, w, h) = area.absolute(fuse::roi_rect(area.width, area.height));
     capture::grab_rect(x, y, w, h)
 }
 
@@ -203,20 +211,93 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
         let mut matches = MatchWatcher::default();
         let mut fuses = FuseCounter::default();
         let mut overlay_shown = false;
+        let mut last_area: Option<Area> = None;
+        let mut paused = false;
+        let mut paused_turn = 0u32;
+        let mut hud_on_screen = false;
         let mut turn = 0u32;
         let mut failing = false;
         let mut previous = Reading::Nothing;
         let mut unknown_samples = 0;
         let mut unknown_saved_at = 0;
+        // Problemas para ver el juego, para avisar en el panel.
+        let mut vision = Vision::default();
+        let announce = |problem: Problem| {
+            diag.log(&format!("visión del juego: {problem:?}"));
+            crate::set_vision_problem(&app, problem);
+        };
 
         loop {
             let tick = Instant::now();
-            let roi = match grab_notice_zone() {
+            // Dónde está el juego: su ventana (cualquier tamaño o monitor) o,
+            // si no está delante, el monitor principal.
+            let area = match capture::game_area() {
+                Ok(area) => area,
+                Err(error) => {
+                    if !failing {
+                        diag.detection_error(Some(error));
+                        failing = true;
+                    }
+                    if let Some(problem) = vision.capture_failed() {
+                        announce(problem);
+                    }
+                    std::thread::sleep(RETRY);
+                    continue;
+                }
+            };
+            if last_area != Some(area) {
+                diag.set_game_area(area.width, area.height, area.window);
+                crate::remember_game_area(&area);
+                if overlay_shown {
+                    crate::place_overlay(&app, &area);
+                }
+                last_area = Some(area);
+            }
+            // Sin el juego delante se pausa el análisis: ahorra procesador y no
+            // se lee nada de otras aplicaciones. Por si la ventana del juego no
+            // se reconociera, se sigue mirando cada 2 s solo el HUD de partida
+            // (un recorte diminuto): si se ve, se está jugando y se analiza.
+            if area.window {
+                paused_turn = 0;
+                hud_on_screen = false;
+            } else {
+                if paused_turn.is_multiple_of(PAUSED_HUD_EVERY) {
+                    hud_on_screen =
+                        grab_health_bar(&area).is_ok_and(|zone| scene::hud_visible(&zone));
+                    if !hud_on_screen
+                        && let Some(problem) = vision.no_game(capture::game_window_too_small())
+                    {
+                        announce(problem);
+                    }
+                }
+                paused_turn = paused_turn.wrapping_add(1);
+                if !hud_on_screen {
+                    if !paused {
+                        diag.set_paused(true);
+                        paused = true;
+                    }
+                    if overlay_shown {
+                        crate::set_overlay_visible(&app, false);
+                        overlay_shown = false;
+                    }
+                    std::thread::sleep(PAUSED_INTERVAL.saturating_sub(tick.elapsed()));
+                    continue;
+                }
+            }
+            if paused {
+                diag.set_paused(false);
+                paused = false;
+            }
+
+            let roi = match grab_notice_zone(&area) {
                 Ok(roi) => roi,
                 Err(error) => {
                     if !failing {
                         diag.detection_error(Some(error));
                         failing = true;
+                    }
+                    if let Some(problem) = vision.capture_failed() {
+                        announce(problem);
                     }
                     std::thread::sleep(RETRY);
                     continue;
@@ -226,14 +307,20 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 diag.detection_error(None);
                 failing = false;
             }
+            // Solo cuenta como negro con la ventana del juego reconocida delante.
+            if let Some(problem) = vision.frame(now_ms(), area.window && is_black(&roi.rgb)) {
+                announce(problem);
+            }
 
             // Inicio y fin de partida, por la barra de vida.
             turn = turn.wrapping_add(1);
             if turn.is_multiple_of(SCENE_EVERY)
-                && let Ok(zone) = grab_health_bar()
+                && let Ok(zone) = grab_health_bar(&area)
             {
                 let visible = scene::hud_visible(&zone);
                 diag.set_hud_visible(visible);
+                // Solo hay resumen si de verdad se cerró una partida abierta.
+                let mut closed = false;
                 let change = match matches.step(now_ms(), visible) {
                     Some(MatchEvent::Started) => {
                         diag.log("partida: empieza (se ve el HUD)");
@@ -244,11 +331,15 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                     Some(MatchEvent::Ended { at }) => {
                         diag.log("partida: termina (el HUD dejó de verse)");
                         Some(crate::update(&app, |tracker, _| {
+                            closed = tracker.stats()?.in_match;
                             tracker.match_ended(at, EndReason::Lobby)
                         }))
                     }
                     None => None,
                 };
+                if closed && matches!(change, Some(Ok(_))) {
+                    crate::announce_match_summary(&app);
+                }
                 if let Some(Err(error)) = change {
                     diag.log(&format!("no se pudo guardar el cambio de partida: {error}"));
                 }
@@ -260,6 +351,9 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
                 let wanted = diag.show_overlay() && capture::game_in_foreground();
                 if wanted != overlay_shown {
                     crate::set_overlay_visible(&app, wanted);
+                    if wanted {
+                        crate::place_overlay(&app, &area);
+                    }
                     overlay_shown = wanted;
                 }
             }
@@ -267,10 +361,7 @@ pub fn spawn(app: AppHandle, diag: Arc<Diag>) {
             // Cañón dorado: no da aviso de experiencia; cuenta como cofre de
             // tesoro. Se mira cinco veces por segundo (la zona es grande).
             if turn.is_multiple_of(2) {
-                let zone = capture::screen_size().and_then(|(width, height)| {
-                    let (x, y, w, h) = fuse::roi_rect(width, height);
-                    capture::grab_rect(x, y, w, h)
-                });
+                let zone = grab_fuse_zone(&area);
                 let was_visible = fuses.visible();
                 let grown = zone.ok().and_then(|zone| fuses.step(fuse::read(&zone)));
                 if fuses.visible() && !was_visible {
@@ -594,5 +685,49 @@ mod tests {
         assert_eq!(counted, [Normal]);
         // El aviso dura unos 20 frames; se lee bien en casi todos, no solo en dos.
         assert!(frames_read >= 16, "solo se leyó en {frames_read} frames");
+    }
+
+    /// Medición manual: cuánto cuesta analizar un segundo de juego (10 avisos,
+    /// 5 zonas del cañón, 1 HUD) con recortes reales. Es lo que se ahorra en
+    /// pausa. Uso: cargo test --release coste_del_analisis -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn coste_del_analisis() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Debug/reales");
+        let load = |path: std::path::PathBuf| {
+            let image = image::open(path).unwrap().into_rgb8();
+            Frame {
+                width: image.width(),
+                height: image.height(),
+                rgb: image.into_raw(),
+            }
+        };
+        let notice_roi = load(root.join("normal_p4_192.4.png"));
+        let fuse_roi = load(root.join("canon/0010.png"));
+        let hud_roi = load(root.join("hud/si_real_0.png"));
+        let start = Instant::now();
+        let seconds = 20;
+        for _ in 0..seconds {
+            for _ in 0..10 {
+                std::hint::black_box(notice::read_scored(&notice_roi));
+            }
+            for _ in 0..5 {
+                std::hint::black_box(fuse::read(&fuse_roi));
+            }
+            std::hint::black_box(scene::hud_visible(&hud_roi));
+        }
+        let per_second = start.elapsed() / seconds;
+        let paused = {
+            let start = Instant::now();
+            for _ in 0..100 {
+                std::hint::black_box(scene::hud_visible(&hud_roi));
+            }
+            start.elapsed() / 100 / 2 // una lectura del HUD cada 2 s
+        };
+        println!(
+            "análisis por segundo de juego: {per_second:?} ({:.1} % de un núcleo)",
+            per_second.as_secs_f64() * 100.0
+        );
+        println!("en pausa, por segundo: {paused:?}");
     }
 }

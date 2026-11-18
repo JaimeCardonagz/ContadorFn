@@ -3,7 +3,7 @@
 //! Todas las funciones reciben `now` (epoch ms) para poder probarse sin reloj.
 
 use crate::settings::Settings;
-use crate::store::{ChestType, Counts, EndReason, MatchSummary, Scope, Store};
+use crate::store::{ChestType, Counts, EndReason, MatchSummary, RecordMatch, Scope, Store};
 use rusqlite::Result;
 use serde::Serialize;
 
@@ -11,8 +11,30 @@ use serde::Serialize;
 pub const DEFAULT_INACTIVITY_MS: i64 = 60 * 60 * 1000;
 /// El historial enseña las partidas de las últimas 24 horas.
 pub const HISTORY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
+/// El último cofre se puede deshacer durante este tiempo.
+pub const UNDO_WINDOW_MS: i64 = 5 * 60 * 1000;
 
+/// Último cofre contado, para poder deshacerlo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct LastChest {
+    pub kind: ChestType,
+    pub at: i64,
+}
+
+/// Récords para la pestaña Estadísticas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Records {
+    /// La partida con más cofres.
+    pub most_chests: Option<RecordMatch>,
+    /// La partida más larga.
+    pub longest: Option<RecordMatch>,
+    /// Partidas terminadas en las últimas 24 h y cofres que sumaron.
+    pub day_matches: u32,
+    pub day_chests: u32,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stats {
     pub in_match: bool,
@@ -26,6 +48,10 @@ pub struct Stats {
     pub session_matches: u32,
     /// Partidas de siempre, incluidos los ajustes manuales.
     pub total_matches: u32,
+    /// Último cofre contado (la interfaz solo ofrece deshacerlo si es reciente).
+    pub last_chest: Option<LastChest>,
+    /// Conteo en pausa: no se cuentan cofres ni partidas nuevas.
+    pub paused: bool,
 }
 
 pub struct Tracker {
@@ -37,6 +63,8 @@ pub struct Tracker {
     /// Partida cuyos cofres se muestran: la activa.
     shown_match: Option<i64>,
     last_activity: i64,
+    /// Conteo en pausa (solo mientras el programa sigue abierto).
+    paused: bool,
 }
 
 impl Tracker {
@@ -63,6 +91,7 @@ impl Tracker {
             active_match: None,
             shown_match: None,
             last_activity,
+            paused: false,
         })
     }
 
@@ -88,8 +117,14 @@ impl Tracker {
     }
 
     /// Se detectó el HUD de partida. Inicia sesión automática si hace falta.
+    /// Pausa o reanuda el conteo. En pausa no empiezan partidas ni se cuentan
+    /// cofres; los ajustes a mano siguen funcionando.
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+    }
+
     pub fn match_started(&mut self, now: i64) -> Result<()> {
-        if self.active_match.is_some() {
+        if self.paused || self.active_match.is_some() {
             return Ok(());
         }
         let session_id = self.start_session(now, true)?;
@@ -125,6 +160,9 @@ impl Tracker {
         confidence: f32,
         signals: u8,
     ) -> Result<()> {
+        if self.paused {
+            return Ok(());
+        }
         self.match_started(now)?;
         let (Some((session_id, _)), Some(match_id)) = (self.session, self.active_match) else {
             unreachable!("match_started deja sesión y partida activas");
@@ -144,6 +182,30 @@ impl Tracker {
     /// Partidas terminadas de las últimas 24 horas, la más reciente primero.
     pub fn history(&self, now: i64) -> Result<Vec<MatchSummary>> {
         self.store.recent_matches(now - HISTORY_WINDOW_MS)
+    }
+
+    /// Récords de todas las partidas registradas y promedio de las últimas 24 h.
+    pub fn records(&self, now: i64) -> Result<Records> {
+        let day = self.history(now)?;
+        let day_chests: u32 = day.iter().map(|m| m.counts.total).sum();
+        Ok(Records {
+            most_chests: self.store.most_chests_match()?,
+            longest: self.store.longest_match()?,
+            day_matches: day.len() as u32,
+            day_chests,
+        })
+    }
+
+    pub fn meta(&self, key: &str) -> Result<Option<String>> {
+        self.store.meta(key)
+    }
+
+    pub fn set_meta(&mut self, key: &str, value: &str) -> Result<()> {
+        self.store.set_meta(key, value)
+    }
+
+    pub fn backup_to(&self, path: &std::path::Path) -> Result<()> {
+        self.store.backup_to(path)
     }
 
     pub fn settings(&self) -> Result<Settings> {
@@ -173,6 +235,18 @@ impl Tracker {
     /// Devuelve `false` si lo dejaría en negativo.
     pub fn adjust_matches(&mut self, now: i64, delta: i64) -> Result<bool> {
         self.store.adjust_matches(now, delta)
+    }
+
+    /// Quita el último cofre contado si es de los últimos 5 minutos.
+    /// Devuelve su tipo, o `None` si no había ninguno que se pudiera quitar.
+    pub fn undo_last_chest(&mut self, now: i64) -> Result<Option<ChestType>> {
+        match self.store.last_chest()? {
+            Some((id, at, kind)) if now - at <= UNDO_WINDOW_MS && at <= now => {
+                self.store.delete_chest(id)?;
+                Ok(Some(kind))
+            }
+            _ => Ok(None),
+        }
     }
 
     /// Cierra la sesión por inactividad. Devuelve `true` si cambió algo.
@@ -206,6 +280,11 @@ impl Tracker {
                 None => 0,
             },
             total_matches: self.store.total_matches()?.max(0) as u32,
+            last_chest: self
+                .store
+                .last_chest()?
+                .map(|(_, at, kind)| LastChest { kind, at }),
+            paused: self.paused,
         })
     }
 
@@ -513,6 +592,70 @@ mod tests {
     }
 
     #[test]
+    fn en_pausa_no_se_cuenta_nada_y_al_reanudar_si() {
+        let mut t = tracker();
+        t.set_paused(true);
+        chest(&mut t, 1_000, ChestType::Normal);
+        t.match_started(2_000).unwrap();
+        let s = t.stats().unwrap();
+        assert!(s.paused);
+        assert_eq!(
+            (s.total_counts.total, s.total_matches, s.in_match),
+            (0, 0, false)
+        );
+        // Los ajustes a mano siguen funcionando.
+        t.adjust_total(3_000, ChestType::Rare, 2).unwrap();
+        assert_eq!(t.stats().unwrap().total_counts.rare, 2);
+        t.set_paused(false);
+        chest(&mut t, 4_000, ChestType::Normal);
+        let s = t.stats().unwrap();
+        assert!(!s.paused);
+        assert_eq!((s.total_counts.normal, s.match_counts.total), (1, 1));
+    }
+
+    #[test]
+    fn los_records_cuentan_todas_las_partidas_y_el_promedio_solo_las_ultimas_24_horas() {
+        let mut t = tracker();
+        let empty = t.records(0).unwrap();
+        assert_eq!(
+            (empty.most_chests, empty.longest, empty.day_matches),
+            (None, None, 0),
+            "sin partidas no hay récords"
+        );
+        // Hace 30 horas: la partida con más cofres (3) y la más larga (25 min).
+        t.match_started(0).unwrap();
+        chest(&mut t, MIN, ChestType::Normal);
+        chest(&mut t, 2 * MIN, ChestType::Rare);
+        chest(&mut t, 3 * MIN, ChestType::Spirit);
+        t.match_ended(25 * MIN, EndReason::Eliminated).unwrap();
+        // Recientes: 2 cofres en 10 min, y otra con 2 cofres (empate: gana la primera).
+        let base = 30 * HOUR;
+        t.match_started(base).unwrap();
+        chest(&mut t, base + MIN, ChestType::Normal);
+        chest(&mut t, base + 2 * MIN, ChestType::Normal);
+        t.match_ended(base + 10 * MIN, EndReason::Lobby).unwrap();
+        t.match_started(base + 20 * MIN).unwrap();
+        chest(&mut t, base + 21 * MIN, ChestType::Rare);
+        t.match_ended(base + 24 * MIN, EndReason::Lobby).unwrap();
+        // En curso, con muchos cofres: no cuenta hasta que termine.
+        t.match_started(base + 30 * MIN).unwrap();
+        for i in 0..5 {
+            chest(&mut t, base + 31 * MIN + i, ChestType::Normal);
+        }
+
+        let r = t.records(base + 40 * MIN).unwrap();
+        let most = r.most_chests.unwrap();
+        assert_eq!((most.started_at, most.counts.total), (0, 3));
+        assert_eq!(
+            (most.counts.normal, most.counts.rare, most.counts.spirit),
+            (1, 1, 1)
+        );
+        let longest = r.longest.unwrap();
+        assert_eq!((longest.started_at, longest.duration_ms), (0, 25 * MIN));
+        assert_eq!((r.day_matches, r.day_chests), (2, 3));
+    }
+
+    #[test]
     fn el_historial_ensena_solo_las_partidas_terminadas_de_las_ultimas_24_horas() {
         let mut t = tracker();
         // Una partida de hace 30 horas: fuera del historial.
@@ -565,5 +708,43 @@ mod tests {
             (history[0].duration_ms, history[0].counts.total),
             (5 * MIN, 0)
         );
+    }
+
+    #[test]
+    fn se_puede_deshacer_el_ultimo_cofre_durante_5_minutos() {
+        let mut t = tracker();
+        t.match_started(1_000).unwrap();
+        chest(&mut t, 2_000, ChestType::Normal);
+        chest(&mut t, 3_000, ChestType::Rare);
+        assert_eq!(
+            t.stats().unwrap().last_chest,
+            Some(LastChest {
+                kind: ChestType::Rare,
+                at: 3_000
+            })
+        );
+
+        assert_eq!(
+            t.undo_last_chest(3_000 + 4 * MIN).unwrap(),
+            Some(ChestType::Rare)
+        );
+        let s = t.stats().unwrap();
+        for c in [s.match_counts, s.session_counts, s.total_counts] {
+            assert_eq!(
+                (c.normal, c.rare, c.total),
+                (1, 0, 1),
+                "se quita de todos los contadores"
+            );
+        }
+        // El anterior ya tiene más de 5 minutos: no se puede quitar.
+        assert_eq!(t.undo_last_chest(2_000 + 6 * MIN).unwrap(), None);
+        assert_eq!(t.stats().unwrap().total_counts.total, 1);
+    }
+
+    #[test]
+    fn sin_cofres_no_hay_nada_que_deshacer() {
+        let mut t = tracker();
+        assert_eq!(t.undo_last_chest(1_000).unwrap(), None);
+        assert_eq!(t.stats().unwrap().last_chest, None);
     }
 }

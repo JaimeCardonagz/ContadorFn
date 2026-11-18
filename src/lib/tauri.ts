@@ -3,6 +3,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -23,6 +24,8 @@ const sample: Record<string, unknown> = {
     totalCounts: counts(4821, 366, 87),
     sessionMatches: 6,
     totalMatches: 412,
+    lastChest: { kind: "rare", at: Date.now() - 42_000 },
+    paused: new URLSearchParams(location.search).get("pausa") !== null,
   },
   get_settings: {
     language: "es",
@@ -33,6 +36,12 @@ const sample: Record<string, unknown> = {
     saveSamples: false,
     diagnostics: new URLSearchParams(location.search).get("diagnostico") !== null,
     checkUpdates: true,
+    closeToTray: true,
+    startWithWindows: false,
+    matchSummary: true,
+    overlayX: 0,
+    overlayY: 0,
+    overlayHotkey: "Ctrl+Shift+KeyO",
     corner: "top-left",
     setupDone: new URLSearchParams(location.search).get("inicio") === null,
     overlayMatch: "total",
@@ -60,9 +69,20 @@ const sample: Record<string, unknown> = {
     lastDetected: "rare",
     detectError: null,
     hudVisible: true,
+    gameWidth: 1920,
+    gameHeight: 1080,
+    gameWindow: true,
   },
   is_debug: false,
   check_update: "1.2.0",
+  get_records: {
+    mostChests: { startedAt: Date.now() - 3 * 86_400_000, durationMs: 1_385_000, counts: counts(14, 3, 0) },
+    longest: { startedAt: Date.now() - 5 * 86_400_000, durationMs: 1_702_000, counts: counts(6, 1, 1) },
+    dayMatches: 4,
+    dayChests: 35,
+  },
+  get_vision_problem: "none",
+  backup_info: { count: 7, latest: "2026-11-18" },
   get_history: [
     { id: 6, durationMs: 1_114_000, counts: counts(9, 2, 1) },
     { id: 5, durationMs: 742_000, counts: counts(5, 0, 1) },
@@ -79,7 +99,22 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
 
 export function listen<T>(event: string, handler: EventCallback<T>): Promise<UnlistenFn> {
   if (inTauri) return tauriListen<T>(event, handler);
-  return Promise.resolve(() => {});
+  // En el navegador, para probar: window.__emitir("evento", datos).
+  const handlers = (mockHandlers[event] ??= new Set());
+  const wrapped = (payload: unknown) => handler({ event, id: 0, payload: payload as T });
+  handlers.add(wrapped);
+  return Promise.resolve(() => handlers.delete(wrapped));
+}
+
+const mockHandlers: Record<string, Set<(payload: unknown) => void>> = {};
+if (!inTauri && import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__emitir = (event: string, payload: unknown) =>
+    mockHandlers[event]?.forEach((handler) => handler(payload));
+}
+
+/** Empieza a arrastrar la ventana actual con el ratón (solo en la app). */
+export function startDragging(): void {
+  if (inTauri) getCurrentWindow().startDragging().catch(() => {});
 }
 
 /** Versión instalada de la app (en el navegador, una de ejemplo). */

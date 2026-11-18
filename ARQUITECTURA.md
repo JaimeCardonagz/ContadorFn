@@ -182,6 +182,29 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Versión 1.2.0 (2026-11-18)
+
+Dieciséis mejoras de comodidad:
+
+1. **Una sola copia** del programa (`tauri-plugin-single-instance`): abrir otra muestra el panel de la que ya está abierta. Tras actualizar, la nueva espera a que la anterior se cierre (`--esperar <pid>`).
+2. **Cerrar a la bandeja**: la X del panel lo oculta (ajuste "Al cerrar el panel": bandeja o salir).
+3. **Ventana y resolución del juego**: se analiza la ventana del juego en primer plano (cualquier tamaño o monitor, descontando franjas negras si es más alta que 16:9); el contador se pega a ella. Configuración muestra la resolución detectada.
+4. **Análisis en pausa sin el juego delante**: cada 500 ms solo se mira si sigue sin estar el juego; cada 2 s, un recorte diminuto del HUD por si la ventana no se reconociera (`watch.rs`).
+5. **Iniciar con Windows** (`autostart.rs`, clave `HKCU\…\Run`, arranca en la bandeja con `--bandeja`).
+6. **Deshacer el último cofre** si es de los últimos 5 minutos.
+7. **Resumen al terminar la partida** en el contador, 8 s (evento `match-summary`; ajuste `matchSummary`).
+8. **Récords** en Estadísticas: más cofres en una partida, partida más larga (de todas las partidas registradas) y promedio de las últimas 24 h (`Tracker::records`).
+9. **Atajo global configurable** para mostrar u ocultar el contador (`overlayHotkey`, formato `Ctrl+Alt+KeyK`). Sin atajo por defecto; una letra o número exige Ctrl o Alt; F8/F9 solas están reservadas. Si otro programa ya lo usa, no se guarda.
+10. **Copias de seguridad** diarias (`backup.rs`): `VACUUM INTO` a `copias/estadisticas-AAAA-MM-DD.db` (fecha local), se conservan 7; además `copias/antes-de-reiniciar.db` al reiniciar las estadísticas.
+11. **Texto del icono de la bandeja** con los cofres de la partida y del día (y si el conteo está en pausa).
+12. **Aviso si no se ve el juego** (`vision.rs`): captura que falla dos intentos seguidos, imagen totalmente negra 20 s con el juego delante (pantalla completa exclusiva) o ventana del juego menor de 320×180. Evento `vision-problem`, aviso con pista en el panel.
+13. **El panel recuerda tamaño y posición** (`panel.rs`, clave `panel` de `meta`). Si la barra de título ya no se ve en ninguna pantalla, se centra en la principal.
+14. **Contador arrastrable**: "Mover contador" lo hace arrastrable; al guardar pasa a "Posición personalizada" (`corner = "custom"`, `overlayX`/`overlayY` en milésimas del espacio libre de la zona del juego). Nunca queda sobre la barra de vida: se sube justo encima.
+15. **Pantalla inicial en dos pasos**: números validados (enteros de 0 a 1.000.000, también en el backend), Intro para revisar y confirmar, resumen con lo que se va a borrar y opción de cancelar un reinicio.
+16. **Pausar y reanudar el conteo** desde el Contador o el menú de la bandeja. En pausa no empiezan partidas ni se cuentan cofres; los ajustes a mano siguen funcionando. La pausa no se guarda: al reabrir el programa vuelve a contar.
+
+Pendiente de comprobar en Windows: que el atajo global llegue con GeForce NOW delante, el texto del icono de la bandeja, el aviso de imagen negra con pantalla completa exclusiva y arrastrar el contador y el panel.
+
 ### Versión 1.0.1 (2026-11-13)
 
 - **Fin de partida con poca vida**: el HUD de partida se reconoce por la barra de vida **o por su icono "+"**, que sigue en pantalla aunque la barra esté casi vacía. La partida solo termina cuando el HUD desaparece: eliminado o de vuelta en el lobby.

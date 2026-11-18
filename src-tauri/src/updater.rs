@@ -246,6 +246,42 @@ pub fn install_at(exe: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Argumento con el que la versión vieja abre la nueva tras actualizar: la
+/// nueva espera a que la vieja termine antes de arrancar (si no, el control
+/// de instancia única la cerraría al ver la vieja todavía abierta).
+pub const WAIT_ARG: &str = "--esperar";
+
+/// Si el programa se abrió con `--esperar <pid>`, espera (como mucho 15 s) a
+/// que ese proceso termine. Solo espera: no hace nada más con el número.
+pub fn wait_for_previous(args: &[String]) {
+    let Some(pid) = args
+        .windows(2)
+        .find(|pair| pair[0] == WAIT_ARG)
+        .and_then(|pair| pair[1].parse::<u32>().ok())
+    else {
+        return;
+    };
+    wait_for_process(pid);
+}
+
+#[cfg(windows)]
+fn wait_for_process(pid: u32) {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    };
+    // SAFETY: se pide solo permiso de espera; el handle se cierra después.
+    unsafe {
+        if let Ok(process) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+            WaitForSingleObject(process, 15_000);
+            let _ = CloseHandle(process);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn wait_for_process(_pid: u32) {}
+
 /// Borra los restos de una actualización anterior (`.old` y `.new`).
 pub fn cleanup(exe: &Path) {
     let _ = fs::remove_file(sibling(exe, ".old"));
@@ -342,6 +378,15 @@ mod tests {
             signature_from_release(br#"{"tag_name":"v9.9.9"}"#, V999).is_err(),
             "sin notas"
         );
+    }
+
+    #[test]
+    fn sin_el_argumento_de_espera_no_espera() {
+        let start = std::time::Instant::now();
+        wait_for_previous(&["programa".into()]);
+        wait_for_previous(&["programa".into(), WAIT_ARG.into()]);
+        wait_for_previous(&["programa".into(), WAIT_ARG.into(), "no-es-un-numero".into()]);
+        assert!(start.elapsed() < Duration::from_millis(100));
     }
 
     #[test]

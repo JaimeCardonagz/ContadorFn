@@ -69,6 +69,12 @@ pub struct DiagState {
     pub detect_error: Option<String>,
     /// Se ve el HUD de partida (la barra de vida).
     pub hud_visible: bool,
+    /// Tamaño de la zona donde se lee el juego, y si es su ventana.
+    pub game_width: u32,
+    pub game_height: u32,
+    pub game_window: bool,
+    /// Análisis en pausa porque el juego no está delante.
+    pub analysis_paused: bool,
 }
 
 pub struct Diag {
@@ -227,6 +233,20 @@ impl Diag {
         state.detected += 1;
         state.detected_with_input += u32::from(pressed);
         state.last_detected = Some(kind.to_string());
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.log(if paused {
+            "análisis en pausa (el juego no está delante)"
+        } else {
+            "análisis reanudado"
+        });
+        self.lock().analysis_paused = paused;
+    }
+
+    pub fn set_game_area(&self, width: u32, height: u32, window: bool) {
+        let mut state = self.lock();
+        (state.game_width, state.game_height, state.game_window) = (width, height, window);
     }
 
     pub fn set_hud_visible(&self, visible: bool) {

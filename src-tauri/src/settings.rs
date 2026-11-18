@@ -42,12 +42,21 @@ pub struct Settings {
     pub show_overlay: bool,
     /// Modo diagnóstico: pestaña, registro, capturas y atajos F8/F9.
     pub diagnostics: bool,
+    /// Abrir el programa al iniciar sesión en Windows (en la bandeja).
+    pub start_with_windows: bool,
+    /// Al cerrar el panel con la X: ir a la bandeja (true) o salir (false).
+    pub close_to_tray: bool,
     /// Comprobar al arrancar si hay una versión nueva en GitHub.
     pub check_updates: bool,
     /// Guardar un recorte de cada aviso leído, para depurar fallos.
     pub save_samples: bool,
-    /// Esquina del contador: "top-left", "top-right", "bottom-left" o "bottom-right".
+    /// Esquina del contador: "top-left", "top-right", "bottom-right" o
+    /// "custom" (la posición que el usuario eligió arrastrándolo).
     pub corner: String,
+    /// Posición personalizada, en milésimas del espacio libre de la zona del
+    /// juego (0 = izquierda/arriba, 1000 = derecha/abajo).
+    pub overlay_x: u16,
+    pub overlay_y: u16,
     /// Ya se preguntó al usuario cuántos cofres y partidas llevaba.
     pub setup_done: bool,
     /// Número de partida en el contador: "off", "day" (de la sesión) o "total".
@@ -59,6 +68,11 @@ pub struct Settings {
     pub overlay_chests: String,
     /// Colores por tipo en el contador (si no, todo blanco).
     pub overlay_color: bool,
+    /// Mostrar unos segundos el resumen de la partida al terminar.
+    pub match_summary: bool,
+    /// Atajo global para mostrar u ocultar el contador, como "Ctrl+Shift+KeyO".
+    /// Vacío: sin atajo.
+    pub overlay_hotkey: String,
     /// Tamaño del texto del contador: "small", "medium" o "large".
     pub overlay_size: String,
     /// Opacidad del contador, de 40 a 100.
@@ -74,14 +88,20 @@ impl Default for Settings {
             hide_from_capture: true,
             show_overlay: true,
             diagnostics: false,
+            start_with_windows: false,
+            close_to_tray: true,
             check_updates: true,
             save_samples: false,
             corner: "top-left".into(),
+            overlay_x: 0,
+            overlay_y: 0,
             setup_done: false,
             overlay_match: "total".into(),
             overlay_total: true,
             overlay_chests: "sum".into(),
             overlay_color: true,
+            match_summary: true,
+            overlay_hotkey: String::new(),
             overlay_size: "medium".into(),
             overlay_opacity: 100,
         }
@@ -141,14 +161,20 @@ mod tests {
                 hide_from_capture: false,
                 show_overlay: false,
                 diagnostics: true,
+                start_with_windows: true,
+                close_to_tray: false,
                 check_updates: false,
                 save_samples: true,
                 corner: "bottom-right".into(),
+                overlay_x: 250,
+                overlay_y: 900,
                 setup_done: true,
                 overlay_match: "day".into(),
                 overlay_total: false,
                 overlay_chests: "types".into(),
                 overlay_color: false,
+                match_summary: false,
+                overlay_hotkey: "Ctrl+Alt+KeyC".into(),
                 overlay_size: "large".into(),
                 overlay_opacity: 60,
             };
@@ -171,6 +197,10 @@ mod tests {
         assert!(
             old.hide_from_capture,
             "lo que falta toma su valor por defecto"
+        );
+        assert!(
+            old.close_to_tray,
+            "cerrar lleva a la bandeja salvo que se cambie"
         );
     }
 }
