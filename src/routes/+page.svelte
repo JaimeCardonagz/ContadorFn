@@ -15,6 +15,9 @@
     sessionCounts: Counts;
     totalCounts: Counts;
     sessionMatches: number;
+    dayCounts: Counts;
+    dayMatches: number;
+    dayPlayMs: number;
     totalMatches: number;
     paused: boolean;
     matchStartedAt: number | null;
@@ -202,6 +205,11 @@
   const locale = $derived(lang === "en" ? "en-US" : "es-MX");
   const hourOf = (ms: number) => new Date(ms).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
 
+  // Tiempo jugado hoy: partidas terminadas más lo que lleva la de ahora.
+  const playedToday = $derived(
+    stats ? stats.dayPlayMs + (stats.inMatch && stats.matchStartedAt ? Math.max(0, now - stats.matchStartedAt) : 0) : 0,
+  );
+
   // ¿Está el programa analizando el juego o esperando a que esté delante?
   let waiting = $state(true);
 
@@ -356,13 +364,6 @@
       clearInterval(updateTimer);
     };
   });
-
-  function elapsed(since: number | null) {
-    if (since === null) return "";
-    const s = Math.max(0, Math.floor((now - since) / 1000));
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
-  }
 
   // Primera vez (o al reiniciar): lo que el jugador ya llevaba. Dos pasos:
   // escribir los números (validados) y revisar el resumen antes de borrar.
@@ -725,7 +726,7 @@
   <div class="pestana pestana-counter" role="tabpanel" id="panel-counter" aria-labelledby="tab-counter" tabindex="-1">
     <div class="estado">
       <header class:activo={stats.inMatch && !stats.paused} class:pausa={stats.paused}>
-        <i></i>{stats.paused ? t.pausedState : stats.inMatch ? t.inMatch : stats.sessionActive ? t.sessionActive : t.noSession}
+        <i></i>{stats.paused ? t.pausedState : stats.inMatch ? t.inMatch : t.notInMatch}
       </header>
       <span class="deteccion" class:viendo={!waiting} title={t.detectionHelp}>
         {waiting ? t.detectionWaiting : t.detectionActive}
@@ -746,11 +747,11 @@
 
     <section>
       <div class="fila">
-        <span>{t.today} <small>{elapsed(stats.sessionStartedAt)}</small></span>
-        <strong>{stats.sessionCounts.total}</strong>
+        <span>{t.today} {#if playedToday > 0}<small title={t.playedToday}>{clock(playedToday)}</small>{/if}</span>
+        <strong>{stats.dayCounts.total}</strong>
       </div>
-      {@render chips(stats.sessionCounts)}
-      <small class="linea">{t.matches}: {stats.sessionMatches}</small>
+      {@render chips(stats.dayCounts)}
+      <small class="linea">{t.matches}: {stats.dayMatches}</small>
       {#if settings}
         <div class="opcion meta-dia">
           <label for="objetivo">{t.dailyGoal}<Help text={t.help.dailyGoal} /></label>
@@ -774,7 +775,7 @@
       {/if}
       {#if settings && settings.dailyGoal > 0}
         {@const goal = settings.dailyGoal}
-        {@const done = stats.sessionCounts.total}
+        {@const done = stats.dayCounts.total}
         <div class="objetivo" class:cumplido={done >= goal}>
           <div
             class="barra"

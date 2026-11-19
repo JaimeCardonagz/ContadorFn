@@ -9,8 +9,8 @@
     stats: {
       matchCounts: Counts;
       totalCounts: Counts;
-      sessionCounts?: Counts;
-      sessionMatches: number;
+      dayCounts?: Counts;
+      dayMatches: number;
       totalMatches: number;
       paused?: boolean;
       inMatch?: boolean;
@@ -94,7 +94,7 @@
   {#if options.overlayMatch !== "off"}
     <p>
       {t.overlayMatch}
-      <b>{options.overlayMatch === "day" ? stats.sessionMatches : stats.totalMatches}</b>
+      <b>{options.overlayMatch === "day" ? stats.dayMatches : stats.totalMatches}</b>
     </p>
   {/if}
   {#if options.overlayTotal}
@@ -103,8 +103,8 @@
   {#if options.overlayTimer && stats.inMatch && stats.matchStartedAt}
     <p>{t.overlayTime} <b>{elapsed(stats.matchStartedAt)}</b></p>
   {/if}
-  {#if options.overlayGoal && options.dailyGoal && stats.sessionCounts}
-    {@const done = stats.sessionCounts.total}
+  {#if options.overlayGoal && options.dailyGoal && stats.dayCounts}
+    {@const done = stats.dayCounts.total}
     <p class:meta={done >= options.dailyGoal}>
       {t.overlayGoal} <b>{done}/{options.dailyGoal}</b>{#if done >= options.dailyGoal} ✓{/if}
     </p>

@@ -182,6 +182,10 @@ Probado en el equipo de pruebas con GeForce Now (pantalla **1360×768**, no 1366
 
 Pendiente tras esta prueba: una captura real de **"COFRE RARO"** (su plantilla sigue siendo solo la del vídeo).
 
+### Versión 1.4.2 (2026-11-18)
+
+- **"Hoy" es el día de calendario**, no la sesión: cofres (`Scope::Since`), partidas y tiempo jugado desde la medianoche local, leídos de la base de datos. Ya no se pierde al cerrar el programa o reiniciar el equipo (la sesión se cerraba por inactividad o al reabrir) y vuelve a cero a medianoche: el hilo de 30 s avisa al cambiar de día. La hora local sale de Windows (`clock::local_offset_ms`, con horario de verano). El objetivo del día, el contador sobre el juego ("Hoy", "Partida del día") y el icono de la bandeja usan esta cuenta. La tarjeta Hoy muestra el tiempo jugado hoy en lugar del reloj de la sesión, y la cabecera dice "EN PARTIDA" o "FUERA DE PARTIDA".
+
 ### Versión 1.4.1 (2026-11-18)
 
 - **Parpadeo del contador al empezar la partida**: al mostrarse, Windows le daba el foco al contador y se lo quitaba a GeForce NOW; el programa creía que el juego ya no estaba delante, lo ocultaba, el foco volvía y vuelta a empezar (cada segundo, mientras el jugador no pulsaba nada). Ahora el contador no es activable (`focusable(false)`, salvo al colocarlo), si aun así recibe el foco se le devuelve al juego (`capture::give_focus_back_to_game`) y, si el foco lo tiene el propio contador, se sigue considerando delante la última ventana del juego.

@@ -21,6 +21,9 @@ const sample: Record<string, unknown> = {
     sessionStartedAt: Date.now() - 4_530_000,
     matchCounts: counts(9, 2, 1),
     sessionCounts: counts(58, 7, 4),
+    dayCounts: counts(58, 7, 4),
+    dayMatches: 6,
+    dayPlayMs: 4_480_000,
     totalCounts: counts(4821, 366, 87),
     sessionMatches: 6,
     totalMatches: 412,
@@ -49,7 +52,7 @@ const sample: Record<string, unknown> = {
     overlayGoal: true,
     overlayTimer: true,
     theme: new URLSearchParams(location.search).get("tema") ?? "dark",
-    lastSeenVersion: new URLSearchParams(location.search).get("novedades") !== null ? "1.4.0" : "1.4.1",
+    lastSeenVersion: new URLSearchParams(location.search).get("novedades") !== null ? "1.4.1" : "1.4.2",
     corner: "top-left",
     setupDone: new URLSearchParams(location.search).get("inicio") === null,
     overlayMatch: "total",
@@ -140,5 +143,5 @@ export function startDragging(): void {
 
 /** Versión instalada de la app (en el navegador, una de ejemplo). */
 export function appVersion(): Promise<string> {
-  return inTauri ? getVersion() : Promise.resolve("1.4.1");
+  return inTauri ? getVersion() : Promise.resolve("1.4.2");
 }

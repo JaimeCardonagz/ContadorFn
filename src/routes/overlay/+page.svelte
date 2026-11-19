@@ -9,8 +9,8 @@
   type Stats = {
     matchCounts: Counts;
     totalCounts: Counts;
-    sessionCounts: Counts;
-    sessionMatches: number;
+    dayCounts: Counts;
+    dayMatches: number;
     totalMatches: number;
     paused?: boolean;
     inMatch: boolean;

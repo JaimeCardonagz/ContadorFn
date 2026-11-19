@@ -77,6 +77,8 @@ pub struct RecordMatch {
 pub enum Scope {
     Match(i64),
     Session(i64),
+    /// Desde un instante (epoch ms): lo de hoy.
+    Since(i64),
     All,
 }
 
@@ -135,6 +137,8 @@ SELECT MAX(
 
 const COUNT_BY_MATCH: &str =
     "SELECT chest_type, COUNT(*) FROM chest_events WHERE match_id = ?1 GROUP BY chest_type";
+const COUNT_SINCE: &str =
+    "SELECT chest_type, COUNT(*) FROM chest_events WHERE ts >= ?1 GROUP BY chest_type";
 const COUNT_BY_SESSION: &str =
     "SELECT chest_type, COUNT(*) FROM chest_events WHERE session_id = ?1 GROUP BY chest_type";
 // El histórico suma los eventos detectados y los ajustes manuales.
@@ -286,6 +290,7 @@ impl Store {
         let (sql, id) = match scope {
             Scope::Match(id) => (COUNT_BY_MATCH, Some(id)),
             Scope::Session(id) => (COUNT_BY_SESSION, Some(id)),
+            Scope::Since(ts) => (COUNT_SINCE, Some(ts)),
             Scope::All => (COUNT_ALL, None),
         };
         let mut stmt = self.conn.prepare_cached(sql)?;
@@ -449,6 +454,17 @@ impl Store {
             )?
             .query_map(params![offset_ms], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect()
+    }
+
+    /// Partidas que empezaron desde `since` y tiempo jugado en las ya
+    /// terminadas (milisegundos).
+    pub fn matches_since(&self, since: i64) -> Result<(u32, i64)> {
+        self.conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(MAX(COALESCE(ended_at, started_at) - started_at, 0)), 0)
+             FROM matches WHERE started_at >= ?1",
+            params![since],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
     }
 
     pub fn matches_in_session(&self, session_id: i64) -> Result<u32> {

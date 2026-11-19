@@ -38,6 +38,12 @@ pub struct Stats {
     pub total_counts: Counts,
     /// Partidas de la sesión activa.
     pub session_matches: u32,
+    /// Lo de hoy (día local, de medianoche a medianoche): cofres, partidas y
+    /// tiempo jugado en las partidas ya terminadas. Sobrevive a cerrar el
+    /// programa o reiniciar el equipo.
+    pub day_counts: Counts,
+    pub day_matches: u32,
+    pub day_play_ms: i64,
     /// Partidas de siempre, incluidos los ajustes manuales.
     pub total_matches: u32,
     /// Conteo en pausa: no se cuentan cofres ni partidas nuevas.
@@ -108,6 +114,8 @@ pub struct Tracker {
     paused: bool,
     /// Inicio de la partida en curso.
     match_started_at: i64,
+    /// Diferencia de la hora local con la UTC, para saber qué es "hoy".
+    day_offset_ms: i64,
 }
 
 impl Tracker {
@@ -125,6 +133,7 @@ impl Tracker {
             last_activity,
             paused: false,
             match_started_at: 0,
+            day_offset_ms: 0,
         })
     }
 
@@ -341,7 +350,24 @@ impl Tracker {
         Ok(true)
     }
 
+    /// Fija la diferencia de la hora local con la UTC (cambia con el horario
+    /// de verano o la zona horaria del equipo).
+    pub fn set_day_offset(&mut self, offset_ms: i64) {
+        self.day_offset_ms = offset_ms;
+    }
+
+    /// Día local (número de días desde 1970) de `now`.
+    pub fn local_day(&self, now: i64) -> i64 {
+        (now + self.day_offset_ms).div_euclid(crate::clock::DAY_MS)
+    }
+
     pub fn stats(&self) -> Result<Stats> {
+        self.stats_at(crate::now_ms())
+    }
+
+    pub fn stats_at(&self, now: i64) -> Result<Stats> {
+        let today = crate::clock::day_start(now, self.day_offset_ms);
+        let (day_matches, day_play_ms) = self.store.matches_since(today)?;
         let counts = |scope: Option<Scope>| match scope {
             Some(scope) => self.store.counts(scope),
             None => Ok(Counts::default()),
@@ -358,6 +384,9 @@ impl Tracker {
                 None => 0,
             },
             total_matches: self.store.total_matches()?.max(0) as u32,
+            day_counts: counts(Some(Scope::Since(today)))?,
+            day_matches,
+            day_play_ms,
             paused: self.paused,
             match_started_at: self.active_match.map(|_| self.match_started_at),
         })
@@ -664,6 +693,46 @@ mod tests {
         // Y sobrevive a un reinicio.
         let t = Tracker::new(t.into_store(), 7_000, HOUR).unwrap();
         assert_eq!(t.stats().unwrap().total_counts.total, 326);
+    }
+
+    #[test]
+    fn lo_de_hoy_va_de_medianoche_a_medianoche_y_no_depende_de_la_sesion() {
+        const DAY: i64 = 24 * HOUR;
+        let mut t = tracker();
+        t.set_day_offset(-4 * HOUR); // UTC-4
+        // Día 1 (local): una partida de 10 min con 2 cofres.
+        let day1 = DAY + 4 * HOUR; // medianoche local del día 1
+        t.match_started(day1 + HOUR).unwrap();
+        chest(&mut t, day1 + HOUR + MIN, ChestType::Normal);
+        chest(&mut t, day1 + HOUR + 2 * MIN, ChestType::Rare);
+        t.match_ended(day1 + HOUR + 10 * MIN, EndReason::Lobby)
+            .unwrap();
+        let s = t.stats_at(day1 + 2 * HOUR).unwrap();
+        assert_eq!(
+            (s.day_counts.total, s.day_matches, s.day_play_ms),
+            (2, 1, 10 * MIN)
+        );
+        // Horas después la sesión ya se cerró por inactividad, pero hoy sigue igual.
+        t.tick(day1 + 20 * HOUR).unwrap();
+        let s = t.stats_at(day1 + 20 * HOUR).unwrap();
+        assert!(!s.session_active);
+        assert_eq!(s.day_counts.total, 2);
+        // "Reiniciar el equipo": se abre otra vez la misma base de datos.
+        let reopened = Tracker::new(t.into_store(), day1 + 21 * HOUR, HOUR).unwrap();
+        let mut reopened = reopened;
+        reopened.set_day_offset(-4 * HOUR);
+        assert_eq!(
+            reopened
+                .stats_at(day1 + 21 * HOUR)
+                .unwrap()
+                .day_counts
+                .total,
+            2
+        );
+        // A medianoche local empieza otro día.
+        let s = reopened.stats_at(day1 + DAY + MIN).unwrap();
+        assert_eq!((s.day_counts.total, s.day_matches), (0, 0));
+        assert_eq!(s.total_counts.total, 2, "el histórico no cambia");
     }
 
     #[test]

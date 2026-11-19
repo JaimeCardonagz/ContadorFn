@@ -9,7 +9,7 @@ Funciona tanto con **GeForce NOW** como con el **launcher directo de Fortnite**.
 ## Qué hace
 
 - Cuenta los **cofres abiertos**: de tesoro, raros y de espíritus. Los cofres destruidos no se cuentan.
-- Lleva la cuenta de la **partida**, del **día** y del **total**, con el promedio de cofres por partida.
+- Lleva la cuenta de la **partida**, del **día** (de medianoche a medianoche, aunque cierres el programa o reinicies el equipo) y del **total**, con el promedio de cofres por partida.
 - Detecta sola cuándo empieza y termina cada partida.
 - Muestra un **contador pequeño, solo texto y sin fondo**, en la esquina que elijas o donde lo dejes arrastrándolo. Tú decides qué enseña, con o sin colores, su tamaño y su opacidad.
 - Al terminar cada partida, el contador enseña unos segundos un **resumen**: cofres y duración. También puede mostrar el **tiempo de la partida** en curso.

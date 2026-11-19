@@ -1,6 +1,7 @@
 mod autostart;
 mod backup;
 mod capture;
+mod clock;
 // La máquina de estados completa aún no se usa: falta leer de la pantalla el
 // recuadro "BUSCAR" y el anillo. De momento cuenta `watch` con solo el aviso.
 #[allow(dead_code)]
@@ -581,11 +582,11 @@ fn tray_tooltip(stats: &Stats) -> String {
     } else {
         tr("Fuera de partida", "Not in a match").to_string()
     };
-    let matches = stats.session_matches;
+    let matches = stats.day_matches;
     let day = format!(
         "{}: {} · {matches} {}",
         tr("Hoy", "Today"),
-        chests(stats.session_counts.total),
+        chests(stats.day_counts.total),
         if matches == 1 {
             tr("partida", "match")
         } else {
@@ -1097,7 +1098,8 @@ pub fn run() {
             }
             std::fs::create_dir_all(&dir)?;
             let store = Store::open(&dir.join("chests.db"))?;
-            let tracker = Tracker::new(store, now_ms(), DEFAULT_INACTIVITY_MS)?;
+            let mut tracker = Tracker::new(store, now_ms(), DEFAULT_INACTIVITY_MS)?;
+            tracker.set_day_offset(clock::local_offset_ms());
             let settings = tracker.settings()?;
             // Abierto al iniciar sesión: directo a la bandeja (salvo la primera
             // vez, que hay que contestar la pantalla inicial).
@@ -1192,6 +1194,7 @@ pub fn run() {
             let backups = handle.state::<BackupDir>().0.clone();
             std::thread::spawn(move || {
                 let mut backed_up = String::new();
+                let mut shown_day = i64::MIN;
                 loop {
                     let state = handle.state::<AppState>();
                     let Ok(tracker) = state.0.lock() else {
@@ -1210,7 +1213,12 @@ pub fn run() {
                     let Ok(mut tracker) = state.0.lock() else {
                         return;
                     };
-                    if let Ok(true) = tracker.tick(now_ms())
+                    // A medianoche (u otro cambio de hora) "hoy" vuelve a empezar.
+                    tracker.set_day_offset(clock::local_offset_ms());
+                    let day = tracker.local_day(now_ms());
+                    let new_day = day != shown_day;
+                    shown_day = day;
+                    if (matches!(tracker.tick(now_ms()), Ok(true)) || new_day)
                         && let Ok(stats) = tracker.stats()
                     {
                         refresh_tray(&handle, &stats);
@@ -1333,8 +1341,8 @@ mod tests {
         let mut stats = Stats {
             in_match: true,
             match_counts: counts(1),
-            session_counts: counts(12),
-            session_matches: 4,
+            day_counts: counts(12),
+            day_matches: 4,
             ..Stats::default()
         };
         assert_eq!(
@@ -1342,7 +1350,7 @@ mod tests {
             "Fortnite Chest Counter\nPartida: 1 cofre\nHoy: 12 cofres · 4 partidas"
         );
         stats.in_match = false;
-        stats.session_matches = 1;
+        stats.day_matches = 1;
         let text = tray_tooltip(&stats);
         assert_eq!(
             text,

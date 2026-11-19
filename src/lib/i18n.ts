@@ -4,8 +4,8 @@ export type Lang = "es" | "en";
 
 const es = {
   inMatch: "EN PARTIDA",
-  sessionActive: "SESIÓN ACTIVA",
-  noSession: "SIN SESIÓN",
+  notInMatch: "FUERA DE PARTIDA",
+  playedToday: "Tiempo jugado hoy",
   pausedState: "CONTEO EN PAUSA",
   pausedTitle: "Conteo en pausa",
   pausedHint: "No se cuentan cofres ni partidas hasta que lo reanudes.",
@@ -236,10 +236,9 @@ const es = {
   whatsNewTitle: (version: string) => `Novedades de la versión ${version}`,
   gotIt: "Entendido",
   whatsNew: [
-    "El contador ya no parpadea al empezar la partida.",
-    "Si te eliminan pero tu escuadra sigue viva, la partida ya no se parte en dos: termina al salir la pantalla «QUEDASTE».",
-    "Nuevo atajo para terminar la partida a mano, por si vuelves al lobby antes de que acabe.",
-    "El aviso de que no se puede leer la pantalla sale también sobre el juego.",
+    "«Hoy» cuenta ahora el día completo, de medianoche a medianoche: ya no se pierde al cerrar el programa o reiniciar el PC.",
+    "El objetivo del día usa esa misma cuenta, así que tampoco vuelve a cero al reiniciar.",
+    "La tarjeta Hoy muestra el tiempo que llevas jugado hoy.",
   ],
   tabsLabel: "Secciones del panel",
   themes: { dark: "Oscuro", light: "Claro", system: "Como Windows" } as Record<string, string>,
@@ -286,8 +285,8 @@ const es = {
 
 const en: typeof es = {
   inMatch: "IN MATCH",
-  sessionActive: "SESSION ACTIVE",
-  noSession: "NO SESSION",
+  notInMatch: "NOT IN A MATCH",
+  playedToday: "Time played today",
   pausedState: "COUNTING PAUSED",
   pausedTitle: "Counting paused",
   pausedHint: "No chests or matches are counted until you resume.",
@@ -518,10 +517,9 @@ const en: typeof es = {
   whatsNewTitle: (version: string) => `What's new in version ${version}`,
   gotIt: "Got it",
   whatsNew: [
-    "The counter no longer flickers when a match starts.",
-    "If you're eliminated but your squad is still alive, the match is no longer split in two: it ends when the placement screen appears.",
-    "New shortcut to end the match by hand, in case you go back to the lobby before it ends.",
-    "The can't-read-the-screen warning also shows over the game.",
+    "“Today” now counts the whole day, midnight to midnight: it's no longer lost when you close the app or restart the PC.",
+    "The daily goal uses that same count, so it no longer resets on restart either.",
+    "The Today card shows how long you've played today.",
   ],
   tabsLabel: "Panel sections",
   themes: { dark: "Dark", light: "Light", system: "Like Windows" },
